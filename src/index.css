@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@keyframes loading-bar {
+  0% {
+    transform: translateX(-100%);
+    width: 30%;
+  }
+  50% {
+    width: 60%;
+  }
+  100% {
+    transform: translateX(400%);
+    width: 30%;
+  }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 1.5s ease-in-out infinite;
+}
+
+@keyframes toast-shrink {
+  from { width: 100%; }
+  to   { width: 0%; }
+}
+
+/* Quill editor in notification form */
+.quill-wrapper .ql-toolbar {
+  border: none;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 8px;
+}
+.quill-wrapper .ql-container {
+  border: none;
+  font-size: 0.875rem;
+}
+.quill-wrapper .ql-editor {
+  min-height: 150px;
+  max-height: 300px;
+  overflow-y: auto;
+  color: #334155;
+}
+.quill-wrapper .ql-editor.ql-blank::before {
+  color: #94a3b8;
+  font-style: normal;
+}
+
+/* Rich text display in notification modal */
+.notification-body p { margin-bottom: 0.5em; }
+.notification-body strong { font-weight: 600; }
+.notification-body em { font-style: italic; }
+.notification-body u { text-decoration: underline; }
+.notification-body ul { list-style: disc; padding-left: 1.5em; margin-bottom: 0.5em; }
+.notification-body ol { list-style: decimal; padding-left: 1.5em; margin-bottom: 0.5em; }
+.notification-body a { color: #2563eb; text-decoration: underline; }
