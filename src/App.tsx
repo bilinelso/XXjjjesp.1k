@@ -34,8 +34,9 @@ import { FinanceiroView } from './components/FinanceiroView';
 import { AddLeadManualModal } from './components/AddLeadManualModal';
 import { PasswordManager } from './components/PasswordManager';
 import { LeadMatchingAudit } from './components/LeadMatchingAudit';
+import { ShadowClientView } from './components/ShadowClientView';
 
-type ViewType = 'leads' | 'dashboard' | 'kanban' | 'agendamentos' | 'atendimentos' | 'campanhas' | 'financeiro' | 'configuracoes' | 'formularios' | 'whatsapp' | 'senhas' | 'lead-audit';
+type ViewType = 'leads' | 'dashboard' | 'kanban' | 'agendamentos' | 'atendimentos' | 'campanhas' | 'financeiro' | 'configuracoes' | 'formularios' | 'whatsapp' | 'senhas' | 'lead-audit' | 'cliente-oculto';
 
 function NavItem({ icon, label, active, collapsed, onClick, badge }: {
   icon: React.ReactNode; label: string; active: boolean; collapsed: boolean; onClick: () => void; badge?: string;
@@ -180,8 +181,7 @@ function AppContent() {
         cliente.nome.toLowerCase().includes(query) ||
         (cliente.email?.toLowerCase() || '').includes(query) ||
         (cliente.telefone || '').includes(query) ||
-        (cliente.assessor?.toLowerCase() || '').includes(query) ||
-        (cliente.documento?.toLowerCase() || '').includes(query)
+        (cliente.assessor?.toLowerCase() || '').includes(query)
       );
     });
 
@@ -762,6 +762,7 @@ function AppContent() {
     );
 
     let successCount = 0;
+    const total = selectedClientes.length;
 
     for (const cliente of selectedClientes) {
       try {
@@ -786,17 +787,16 @@ function AppContent() {
     }
 
     await fetchClientes(true);
-    setSelectedClienteIds(new Set());
-    setShowBulkEditModal(false);
-    alert(`Postback enviado com sucesso para ${successCount} de ${selectedClientes.length} cliente(s)!`);
+    return { successCount, total };
   };
 
   const handleBulkSendGclid = async () => {
     const selectedClientes = clientes.filter(c =>
-      selectedClienteIds.has(c.id) && c.lead?.gclid && !c.gclid_enviado
+      selectedClienteIds.has(c.id) && (c.valor_produto ?? 0) > 0 && !c.gclid_enviado
     );
 
     let successCount = 0;
+    const total = selectedClientes.length;
 
     for (const cliente of selectedClientes) {
       try {
@@ -827,9 +827,7 @@ function AppContent() {
     }
 
     await fetchClientes(true);
-    setSelectedClienteIds(new Set());
-    setShowBulkEditModal(false);
-    alert(`Conversão GCLID enviada com sucesso para ${successCount} de ${selectedClientes.length} cliente(s)!`);
+    return { successCount, total };
   };
 
   const handleStatusChange = async (id: string, status: string) => {
@@ -998,7 +996,6 @@ function AppContent() {
       'nome',
       'email',
       'telefone',
-      'documento',
       'data_compra',
       'valor_produto',
       'status',
@@ -1015,7 +1012,6 @@ function AppContent() {
       'João Silva',
       'joao@email.com',
       '+5511999999999',
-      '12345678900',
       '2024-01-15',
       '997',
       'comprou',
@@ -1152,7 +1148,6 @@ function AppContent() {
           nome: cliente.nome,
           email: cliente.email,
           telefone: cliente.telefone,
-          documento: cliente.documento || undefined,
           data_compra: cliente.data_compra,
           valor_produto: parseFloat(cliente.valor_produto),
           status: cliente.status as any,
@@ -1340,6 +1335,9 @@ function AppContent() {
               <NavItem icon={<Calendar size={18} />} label="Agendamentos" active={view === 'agendamentos'} collapsed={sidebarCollapsed} onClick={() => setView('agendamentos')} />
             )}
             <NavItem icon={<Users size={18} />} label="Atendimentos" active={view === 'atendimentos'} collapsed={sidebarCollapsed} onClick={() => setView('atendimentos')} />
+            {profile?.is_master && (
+              <NavItem icon={<Eye size={18} />} label="Cliente Oculto" active={view === 'cliente-oculto'} collapsed={sidebarCollapsed} onClick={() => setView('cliente-oculto')} />
+            )}
           </NavGroup>
           {(profile?.is_master || profile?.can_access_campanhas || canAccess('whatsapp')) && (
             <NavGroup label="Marketing" collapsed={sidebarCollapsed}>
@@ -2731,6 +2729,10 @@ function AppContent() {
         <LeadMatchingAudit />
       )}
 
+      {view === 'cliente-oculto' && profile?.is_master && (
+        <ShadowClientView />
+      )}
+
       {view === 'formularios' && canAccess('formularios') && (
         <div className="max-w-[1600px] mx-auto px-6 py-6">
           <div className="mb-4 flex items-center justify-between">
@@ -3147,7 +3149,6 @@ function AppContent() {
                       <p><span className="font-semibold text-red-600">* nome:</span> Nome completo do cliente</p>
                       <p><span className="font-semibold text-red-600">* email:</span> Email válido</p>
                       <p><span className="font-semibold text-red-600">* telefone:</span> Telefone com DDD</p>
-                      <p><span className="font-semibold">documento:</span> CPF ou documento (opcional)</p>
                       <p><span className="font-semibold text-red-600">* data_compra:</span> Formato AAAA-MM-DD</p>
                       <p><span className="font-semibold text-red-600">* valor_produto:</span> Valor numérico</p>
                       <p><span className="font-semibold text-red-600">* status:</span> comprou, conta-criada, depositou, acompanhamento, problema, finalizado</p>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { X, CreditCard as Edit2, Save, Phone, Plus, EyeOff, Eye, Info, CheckCircle, Calendar, History, ChevronLeft, ChevronRight } from 'lucide-react';
+import { X, CreditCard as Edit2, Save, Phone, Plus, EyeOff, Eye, Info, CheckCircle, Calendar, History, ChevronLeft, ChevronRight, Send } from 'lucide-react';
 import type { Cliente, Ligacao, Agendamento } from '../lib/api';
 import { useLigacoes } from '../hooks/useLigacoes';
 import { useAgendamentos } from '../hooks/useAgendamentos';
@@ -99,6 +99,10 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   };
 
   const categoriaDisplay = cliente.categoria_investimento || getCategoryByValue(cliente.valor_deposito ?? 0);
+
+  // Enhanced Conversions for Leads: a conversão pode ser enviada para qualquer
+  // cliente com compra registrada, mesmo sem GCLID (casa por email/telefone).
+  const temCompra = (cliente.valor_produto ?? 0) > 0;
 
   const { profile } = useAuth();
   const { fetchLigacoes, createLigacao } = useLigacoes();
@@ -341,7 +345,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   };
 
   const handleGclidSend = async () => {
-    if (!cliente.lead?.gclid || sendingGclid || cliente.gclid_enviado) return;
+    if (sendingGclid || cliente.gclid_enviado) return;
 
     setSendingGclid(true);
     try {
@@ -613,6 +617,29 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     >
                       <Info size={16} />
                       <span className="text-sm">Detalhes</span>
+                    </button>
+                  )}
+                  {/* Clientes sem lead vinculado não têm o card de conversão no modal de
+                      detalhes; expõe o envio (Enhanced Conversions) aqui fora. */}
+                  {temCompra && !cliente.lead && (
+                    <button
+                      onClick={handleGclidSend}
+                      disabled={sendingGclid || cliente.gclid_enviado}
+                      className={`px-3 py-2 rounded flex items-center gap-2 text-sm transition-colors ${
+                        cliente.gclid_enviado
+                          ? 'bg-gray-100 border-2 border-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'border-2 border-yellow-500 text-yellow-700 hover:bg-yellow-50 disabled:opacity-50 disabled:cursor-wait'
+                      }`}
+                      title={cliente.gclid_enviado ? 'Conversão já enviada' : 'Enviar conversão ao Google Ads (Enhanced Conversions)'}
+                    >
+                      {cliente.gclid_enviado ? <CheckCircle size={16} /> : <Send size={16} />}
+                      <span>
+                        {cliente.gclid_enviado
+                          ? 'Conversão enviada'
+                          : sendingGclid
+                          ? 'Enviando...'
+                          : 'Enviar Conversão'}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -1015,7 +1042,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                   </div>
                 )}
 
-                {cliente.lead.gclid && (
+                {temCompra && (
                   <div
                     onClick={cliente.gclid_enviado ? undefined : handleGclidSend}
                     className={`rounded-lg p-4 transition-all ${
@@ -1023,14 +1050,16 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                         ? 'bg-gray-100 border border-gray-300 cursor-not-allowed'
                         : `bg-yellow-50 border border-yellow-200 cursor-pointer hover:bg-yellow-100 hover:border-yellow-300 hover:shadow-md ${sendingGclid ? 'opacity-50 cursor-wait' : ''}`
                     }`}
-                    title={cliente.gclid_enviado ? 'Conversão GCLID já enviada' : 'Clique para enviar conversão GCLID ao Google Ads'}
+                    title={cliente.gclid_enviado ? 'Conversão já enviada' : 'Clique para enviar conversão ao Google Ads'}
                   >
                     <p className={`text-xs font-semibold uppercase tracking-wide mb-1 ${
                       cliente.gclid_enviado ? 'text-gray-600' : 'text-yellow-700'
                     }`}>
-                      GCLID {sendingGclid && '(enviando...)'} {cliente.gclid_enviado && '✓ ENVIADO'}
+                      Conversão {sendingGclid && '(enviando...)'} {cliente.gclid_enviado && '✓ ENVIADO'}
                     </p>
-                    <p className="text-sm font-mono text-gray-800 break-all">{cliente.lead.gclid}</p>
+                    <p className="text-sm font-mono text-gray-800 break-all">
+                      {cliente.lead?.gclid || 'Sem GCLID (Enhanced Conversions)'}
+                    </p>
                     {cliente.gclid_enviado && cliente.gclid_enviado_em && (
                       <p className="text-xs text-gray-500 mt-2">
                         Enviado em {new Date(cliente.gclid_enviado_em).toLocaleString('pt-BR')}

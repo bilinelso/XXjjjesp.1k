@@ -14,7 +14,6 @@ export type Cliente = {
   nome: string;
   email: string;
   telefone: string;
-  documento?: string;
   data_compra: string;
   valor_produto: number;
   status: 'comprou' | 'conta-criada' | 'depositou' | 'acompanhamento' | 'problema';

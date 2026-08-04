@@ -1,15 +1,30 @@
 import React, { useState } from 'react';
-import { X, Save, Send, AlertTriangle } from 'lucide-react';
+import { X, Save, Send, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { Cliente } from '../lib/api';
 import { LoadingSpinner } from './LoadingSpinner';
 import { useKanbanColumns } from '../hooks/useKanbanColumns';
+
+type BulkSendResult = { successCount: number; total: number };
 
 type BulkEditModalProps = {
   selectedClientes: Cliente[];
   onClose: () => void;
   onBulkUpdate: (updates: Partial<Cliente>) => Promise<void>;
-  onBulkSendPostback: () => Promise<void>;
-  onBulkSendGclid: () => Promise<void>;
+  onBulkSendPostback: () => Promise<BulkSendResult>;
+  onBulkSendGclid: () => Promise<BulkSendResult>;
+};
+
+type ConfirmDialog = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+};
+
+type Feedback = {
+  type: 'success' | 'error';
+  title: string;
+  message: string;
 };
 
 export const BulkEditModal: React.FC<BulkEditModalProps> = ({
@@ -24,24 +39,31 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [sendingPostback, setSendingPostback] = useState(false);
   const [sendingGclid, setSendingGclid] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog | null>(null);
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
 
   const hasPostbackClientes = selectedClientes.some(
     c => c.lead?.click_id && !c.postback_enviado
   );
+  // Enhanced Conversions for Leads: elegível = cliente com compra registrada e ainda não enviado
   const hasGclidClientes = selectedClientes.some(
-    c => c.lead?.gclid && !c.gclid_enviado
+    c => (c.valor_produto ?? 0) > 0 && !c.gclid_enviado
   );
 
   const postbackCount = selectedClientes.filter(
     c => c.lead?.click_id && !c.postback_enviado
   ).length;
   const gclidCount = selectedClientes.filter(
-    c => c.lead?.gclid && !c.gclid_enviado
+    c => (c.valor_produto ?? 0) > 0 && !c.gclid_enviado
   ).length;
 
   const handleSave = async () => {
     if (Object.keys(updates).length === 0) {
-      alert('Nenhuma alteração para salvar');
+      setFeedback({
+        type: 'error',
+        title: 'Nenhuma alteração',
+        message: 'Preencha pelo menos um campo para salvar as alterações.'
+      });
       return;
     }
 
@@ -54,34 +76,64 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     }
   };
 
-  const handleSendPostback = async () => {
+  const handleSendPostback = () => {
     if (!hasPostbackClientes) return;
 
-    if (!confirm(`Enviar postback para ${postbackCount} cliente(s)?`)) {
-      return;
-    }
-
-    setSendingPostback(true);
-    try {
-      await onBulkSendPostback();
-    } finally {
-      setSendingPostback(false);
-    }
+    setConfirmDialog({
+      title: 'Enviar Postback (Tracker)',
+      message: `Deseja enviar o postback de conversão ao tracker para ${postbackCount} cliente(s) selecionado(s)?`,
+      confirmLabel: 'Enviar Postback',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setSendingPostback(true);
+        try {
+          const { successCount, total } = await onBulkSendPostback();
+          setFeedback({
+            type: successCount > 0 ? 'success' : 'error',
+            title: 'Envio de Postback',
+            message: `Postback enviado para ${successCount} de ${total} cliente(s).`
+          });
+        } catch {
+          setFeedback({
+            type: 'error',
+            title: 'Falha no envio',
+            message: 'Não foi possível enviar o postback. Tente novamente.'
+          });
+        } finally {
+          setSendingPostback(false);
+        }
+      }
+    });
   };
 
-  const handleSendGclid = async () => {
+  const handleSendGclid = () => {
     if (!hasGclidClientes) return;
 
-    if (!confirm(`Enviar conversão GCLID para ${gclidCount} cliente(s)?`)) {
-      return;
-    }
-
-    setSendingGclid(true);
-    try {
-      await onBulkSendGclid();
-    } finally {
-      setSendingGclid(false);
-    }
+    setConfirmDialog({
+      title: 'Enviar Conversão (Google Ads)',
+      message: `Deseja enviar a conversão GCLID à planilha/Google Ads para ${gclidCount} cliente(s) selecionado(s)?`,
+      confirmLabel: 'Enviar Conversão',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setSendingGclid(true);
+        try {
+          const { successCount, total } = await onBulkSendGclid();
+          setFeedback({
+            type: successCount > 0 ? 'success' : 'error',
+            title: 'Envio de Conversão',
+            message: `Conversão GCLID enviada para ${successCount} de ${total} cliente(s).`
+          });
+        } catch {
+          setFeedback({
+            type: 'error',
+            title: 'Falha no envio',
+            message: 'Não foi possível enviar a conversão. Tente novamente.'
+          });
+        } finally {
+          setSendingGclid(false);
+        }
+      }
+    });
   };
 
   return (
@@ -237,7 +289,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                 }`}>
                   <div className="flex items-center justify-between mb-2">
                     <div>
-                      <p className="font-semibold text-gray-800">Enviar GCLID (Google Ads)</p>
+                      <p className="font-semibold text-gray-800">Enviar Conversão (Google Ads)</p>
                       <p className="text-sm text-gray-600">
                         {gclidCount} cliente(s) elegível(is) para envio
                       </p>
@@ -260,13 +312,13 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                     ) : (
                       <>
                         <Send size={16} />
-                        Enviar GCLID
+                        Enviar Conversão
                       </>
                     )}
                   </button>
                   {!hasGclidClientes && (
                     <p className="text-xs text-gray-500 mt-2">
-                      Nenhum cliente com GCLID disponível ou todos já foram enviados
+                      Nenhum cliente com compra registrada disponível ou todos já foram enviados
                     </p>
                   )}
                 </div>
@@ -284,6 +336,70 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
           </div>
         </div>
       </div>
+
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-start gap-3">
+              <div className="bg-blue-100 rounded-full p-2 flex-shrink-0">
+                <Send className="text-blue-600" size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">{confirmDialog.title}</h3>
+                <p className="text-sm text-gray-600 mt-1">{confirmDialog.message}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-6">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDialog.onConfirm}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+              >
+                {confirmDialog.confirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {feedback && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex items-start gap-3">
+              <div className={`rounded-full p-2 flex-shrink-0 ${
+                feedback.type === 'success' ? 'bg-green-100' : 'bg-red-100'
+              }`}>
+                {feedback.type === 'success' ? (
+                  <CheckCircle2 className="text-green-600" size={20} />
+                ) : (
+                  <AlertTriangle className="text-red-600" size={20} />
+                )}
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">{feedback.title}</h3>
+                <p className="text-sm text-gray-600 mt-1">{feedback.message}</p>
+              </div>
+            </div>
+            <div className="mt-6">
+              <button
+                onClick={() => setFeedback(null)}
+                className={`w-full px-4 py-2 text-white rounded transition-colors ${
+                  feedback.type === 'success'
+                    ? 'bg-green-600 hover:bg-green-700'
+                    : 'bg-red-600 hover:bg-red-700'
+                }`}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
