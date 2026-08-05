@@ -12,6 +12,7 @@ import { LoadingOverlay, LoadingSpinner } from './LoadingSpinner';
 import { AssessorSelect } from './AssessorSelect';
 import { capitalizeName } from '../utils/formatters';
 import { DepositoHistoricoModal } from './DepositoHistoricoModal';
+import { WabaClientHistory } from './waba/WabaClientHistory';
 
 type ClientDetailModalProps = {
   cliente: Cliente;
@@ -786,6 +787,8 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                 <p className="text-gray-500 text-sm">Nenhuma interação registrada</p>
               )}
             </div>
+
+            <WabaClientHistory clienteId={cliente.id} />
 
             <div className="border-t pt-4">
               <h3 className="font-bold mb-3">Novo registro</h3>

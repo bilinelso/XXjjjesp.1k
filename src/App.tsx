@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MessageCircle, User, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
@@ -35,8 +35,9 @@ import { AddLeadManualModal } from './components/AddLeadManualModal';
 import { PasswordManager } from './components/PasswordManager';
 import { LeadMatchingAudit } from './components/LeadMatchingAudit';
 import { ShadowClientView } from './components/ShadowClientView';
+import { WabaView } from './components/waba/WabaView';
 
-type ViewType = 'leads' | 'dashboard' | 'kanban' | 'agendamentos' | 'atendimentos' | 'campanhas' | 'financeiro' | 'configuracoes' | 'formularios' | 'whatsapp' | 'senhas' | 'lead-audit' | 'cliente-oculto';
+type ViewType = 'leads' | 'dashboard' | 'kanban' | 'agendamentos' | 'atendimentos' | 'campanhas' | 'financeiro' | 'configuracoes' | 'formularios' | 'whatsapp' | 'waba' | 'senhas' | 'lead-audit' | 'cliente-oculto';
 
 function NavItem({ icon, label, active, collapsed, onClick, badge }: {
   icon: React.ReactNode; label: string; active: boolean; collapsed: boolean; onClick: () => void; badge?: string;
@@ -132,11 +133,14 @@ function AppContent() {
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [whatsappTargetPhone, setWhatsappTargetPhone] = useState<string | null>(null);
   const [whatsappUnread, setWhatsappUnread] = useState(0);
+  // Contagem do módulo WABA (WhatsApp oficial) — independente do badge do módulo QR.
+  const [wabaUnread, setWabaUnread] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (view === 'whatsapp') setWhatsappUnread(0);
   }, [view]);
+
 
   const handleOpenWhatsApp = (phone: string) => {
     setWhatsappTargetPhone(phone);
@@ -163,6 +167,21 @@ function AppContent() {
     }
   });
   const [meuNomeAssessor, setMeuNomeAssessor] = useState<string | null>(null);
+
+  // Abre a ficha do cliente a partir de uma conversa WABA.
+  const handleOpenClienteFromWaba = async (clienteId: string) => {
+    const local = clientes.find(c => c.id === clienteId);
+    if (local) {
+      setSelectedCliente(local);
+      setShowModal(true);
+      return;
+    }
+    const { data } = await supabase.from('clientes').select('*').eq('id', clienteId).maybeSingle();
+    if (data) {
+      setSelectedCliente(data as Cliente);
+      setShowModal(true);
+    }
+  };
 
   const clientesFiltrados = filtrarClientes(filtros)
     .filter(cliente => mostrarOcultos ? cliente.oculto : !cliente.oculto)
@@ -1339,23 +1358,30 @@ function AppContent() {
               <NavItem icon={<Eye size={18} />} label="Cliente Oculto" active={view === 'cliente-oculto'} collapsed={sidebarCollapsed} onClick={() => setView('cliente-oculto')} />
             )}
           </NavGroup>
-          {(profile?.is_master || profile?.can_access_campanhas || canAccess('whatsapp')) && (
-            <NavGroup label="Marketing" collapsed={sidebarCollapsed}>
-              {(profile?.is_master || profile?.can_access_campanhas) && (
-                <NavItem icon={<TrendingUp size={18} />} label="Campanhas" active={view === 'campanhas'} collapsed={sidebarCollapsed} onClick={() => setView('campanhas')} />
-              )}
-              {canAccess('whatsapp') && (
-                <NavItem
-                  icon={<MessageCircle size={18} />}
-                  label="WhatsApp"
-                  active={view === 'whatsapp'}
-                  collapsed={sidebarCollapsed}
-                  onClick={() => setView('whatsapp')}
-                  badge={whatsappUnread > 0 && view !== 'whatsapp' ? (whatsappUnread > 99 ? '99+' : String(whatsappUnread)) : undefined}
-                />
-              )}
-            </NavGroup>
-          )}
+          {/* O item WABA é visível para todos os usuários autenticados, então o grupo sempre aparece. */}
+          <NavGroup label="Marketing" collapsed={sidebarCollapsed}>
+            {(profile?.is_master || profile?.can_access_campanhas) && (
+              <NavItem icon={<TrendingUp size={18} />} label="Campanhas" active={view === 'campanhas'} collapsed={sidebarCollapsed} onClick={() => setView('campanhas')} />
+            )}
+            {canAccess('whatsapp') && (
+              <NavItem
+                icon={<MessageCircle size={18} />}
+                label="WhatsApp"
+                active={view === 'whatsapp'}
+                collapsed={sidebarCollapsed}
+                onClick={() => setView('whatsapp')}
+                badge={whatsappUnread > 0 && view !== 'whatsapp' ? (whatsappUnread > 99 ? '99+' : String(whatsappUnread)) : undefined}
+              />
+            )}
+            <NavItem
+              icon={<BadgeCheck size={18} />}
+              label="WABA"
+              active={view === 'waba'}
+              collapsed={sidebarCollapsed}
+              onClick={() => setView('waba')}
+              badge={wabaUnread > 0 && view !== 'waba' ? (wabaUnread > 99 ? '99+' : String(wabaUnread)) : undefined}
+            />
+          </NavGroup>
           {(profile?.is_master || profile?.can_access_financeiro) && (
             <NavGroup label="Financeiro" collapsed={sidebarCollapsed}>
               <NavItem icon={<DollarSign size={18} />} label="Financeiro" active={view === 'financeiro'} collapsed={sidebarCollapsed} onClick={() => setView('financeiro')} />
@@ -2859,6 +2885,14 @@ function AppContent() {
           />
         </div>
       )}
+
+      {/* Módulo WABA (WhatsApp oficial) — sempre montado para manter a contagem de não lidas. */}
+      <div style={{ display: view === 'waba' ? 'block' : 'none' }} className="max-w-[1600px] mx-auto px-4">
+        <WabaView
+          onUnreadCountChange={setWabaUnread}
+          onOpenCliente={handleOpenClienteFromWaba}
+        />
+      </div>
 
       {view === 'configuracoes' && canAccess('configuracoes') && (
         <div className="max-w-7xl mx-auto px-4 py-6">
