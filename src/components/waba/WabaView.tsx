@@ -28,7 +28,7 @@ import { WabaMessageMedia } from './WabaMessageMedia';
 import { WabaVoiceRecorder } from './WabaVoiceRecorder';
 import { WabaAttachMenu } from './WabaAttachMenu';
 import { WabaMediaSendPreview } from './WabaMediaSendPreview';
-import { fileToBase64 } from './wabaUtils';
+import { fileToBase64, imageFileToJpeg } from './wabaUtils';
 import type { WabaMediaKind } from '../../lib/wabaApi';
 
 const CHAT_SELECT = '*, waba_contacts(*, clientes(id, nome))';
@@ -677,8 +677,15 @@ export const WabaView: React.FC<WabaViewProps> = ({
     const { kind, file } = pendingAttachment;
 
     let base64: string;
+    let mimeType: string;
     try {
-      base64 = await fileToBase64(file);
+      if (kind === 'image') {
+        // PNG passa no upload da Meta mas falha na entrega — vai sempre JPEG.
+        ({ base64, mimeType } = await imageFileToJpeg(file));
+      } else {
+        base64 = await fileToBase64(file);
+        mimeType = file.type || 'application/octet-stream';
+      }
     } catch {
       return 'Não foi possível preparar o arquivo para envio.';
     }
@@ -687,7 +694,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
       selectedChat.id,
       kind,
       base64,
-      file.type || 'application/octet-stream',
+      mimeType,
       caption || undefined,
       kind === 'document' ? file.name : undefined
     );

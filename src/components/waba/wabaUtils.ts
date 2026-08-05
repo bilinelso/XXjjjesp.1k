@@ -157,6 +157,52 @@ export function fileToBase64(blob: Blob): Promise<string> {
   });
 }
 
+const JPEG_MAX_DIMENSION = 2048;
+const JPEG_QUALITY = 0.85;
+
+/**
+ * Reencoda qualquer imagem aceita para JPEG antes do envio.
+ *
+ * PNGs (screenshots, sobretudo) passam no upload da Meta mas falham na
+ * entrega — a mensagem fica `failed`. JPEG entrega sempre, então o envio é
+ * normalizado aqui. De quebra limita a maior dimensão a 2048px.
+ */
+export async function imageFileToJpeg(
+  file: File
+): Promise<{ base64: string; mimeType: 'image/jpeg' }> {
+  const bitmap = await createImageBitmap(file);
+
+  try {
+    const scale = Math.min(1, JPEG_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('canvas 2d indisponível');
+
+    // JPEG não tem alfa: sem isto, PNG transparente viraria fundo preto.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        result => (result ? resolve(result) : reject(new Error('toBlob falhou'))),
+        'image/jpeg',
+        JPEG_QUALITY
+      );
+    });
+
+    return { base64: await fileToBase64(blob), mimeType: 'image/jpeg' };
+  } finally {
+    bitmap.close();
+  }
+}
+
 /** `1536000` → `1,5 MB` */
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
