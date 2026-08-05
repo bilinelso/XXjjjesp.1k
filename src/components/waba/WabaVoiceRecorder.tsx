@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, Trash2, Check, Play, Pause, Send, Loader2 } from 'lucide-react';
 import type Recorder from 'opus-recorder';
-import { formatMediaDuration } from './wabaUtils';
+import { fileToBase64, formatMediaDuration } from './wabaUtils';
 
 /** Limite da Meta para nota de voz é folgado; 5min mantém o arquivo pequeno. */
 const MAX_SECONDS = 300;
@@ -19,17 +19,6 @@ type WabaVoiceRecorderProps = {
   /** Esconde o botão sem desmontar (ex.: há texto digitado). */
   showMic: boolean;
 };
-
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    // readAsDataURL devolve `data:...;base64,XXX` — o proxy aceita os dois,
-    // mas mandamos só o payload.
-    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
 
 /**
  * Nota de voz do composer WABA: microfone → gravação → preview → envio.
@@ -231,7 +220,7 @@ export const WabaVoiceRecorder: React.FC<WabaVoiceRecorderProps> = ({
 
     let base64: string;
     try {
-      base64 = await blobToBase64(blob);
+      base64 = await fileToBase64(blob);
     } catch {
       onError('Não foi possível preparar o áudio para envio.');
       setPhase('preview');
@@ -254,7 +243,7 @@ export const WabaVoiceRecorder: React.FC<WabaVoiceRecorderProps> = ({
         onClick={handleMicTap}
         aria-label="Gravar mensagem de voz"
         title="Gravar mensagem de voz"
-        className="flex items-center justify-center w-11 min-h-[44px] rounded-lg text-slate-500 hover:bg-slate-100 transition-colors flex-shrink-0"
+        className="flex items-center justify-center w-11 h-11 rounded-full bg-[#0C447C] text-white hover:bg-[#0a3a68] transition-colors flex-shrink-0"
       >
         <Mic size={20} />
       </button>
@@ -263,7 +252,7 @@ export const WabaVoiceRecorder: React.FC<WabaVoiceRecorderProps> = ({
 
   if (phase === 'starting' || phase === 'recording') {
     return (
-      <div className="flex-1 flex items-center gap-2 min-h-[44px]">
+      <div className="flex-1 flex items-center gap-2 min-h-[44px] bg-white border border-slate-200 rounded-3xl shadow-sm px-3 py-0.5">
         {phase === 'starting' ? (
           <Loader2 size={16} className="animate-spin text-slate-400 flex-shrink-0" />
         ) : (
@@ -294,7 +283,7 @@ export const WabaVoiceRecorder: React.FC<WabaVoiceRecorderProps> = ({
 
   // preview | sending
   return (
-    <div className="flex-1 flex items-center gap-2 min-h-[44px]">
+    <div className="flex-1 flex items-center gap-2 min-h-[44px] bg-white border border-slate-200 rounded-3xl shadow-sm px-2 py-0.5">
       {blobUrl && (
         <audio
           ref={previewAudioRef}

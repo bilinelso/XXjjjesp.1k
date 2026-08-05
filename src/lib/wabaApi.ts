@@ -52,8 +52,21 @@ type SendAudioPayload = {
   duration_seconds: number;
 };
 
+export type WabaMediaKind = 'image' | 'document';
+
+type SendMediaPayload = {
+  action: 'send_media';
+  chat_id: string;
+  media_kind: WabaMediaKind;
+  file_base64: string;
+  mime_type: string;
+  caption?: string;
+  /** Obrigatório para document — nome original do arquivo. */
+  filename?: string;
+};
+
 async function wabaProxy(
-  payload: SendTextPayload | SendTemplatePayload | SendAudioPayload
+  payload: SendTextPayload | SendTemplatePayload | SendAudioPayload | SendMediaPayload
 ): Promise<WabaSendResult> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -173,6 +186,26 @@ export const wabaApi = {
     variables: string[]
   ): Promise<WabaSendResult> {
     return wabaProxy({ action: 'send_template', chat_id, template_name, language, variables });
+  },
+
+  /** Imagem ou documento. O proxy grava a mensagem; ela chega pelo realtime. */
+  sendMedia(
+    chat_id: string,
+    media_kind: WabaMediaKind,
+    file_base64: string,
+    mime_type: string,
+    caption?: string,
+    filename?: string
+  ): Promise<WabaSendResult> {
+    return wabaProxy({
+      action: 'send_media',
+      chat_id,
+      media_kind,
+      file_base64,
+      mime_type,
+      caption,
+      filename,
+    });
   },
 
   /** Nota de voz OGG/Opus. O proxy grava a mensagem; ela chega pelo realtime. */

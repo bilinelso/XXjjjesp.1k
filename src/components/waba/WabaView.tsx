@@ -26,6 +26,10 @@ import {
 } from './wabaUtils';
 import { WabaMessageMedia } from './WabaMessageMedia';
 import { WabaVoiceRecorder } from './WabaVoiceRecorder';
+import { WabaAttachMenu } from './WabaAttachMenu';
+import { WabaMediaSendPreview } from './WabaMediaSendPreview';
+import { fileToBase64 } from './wabaUtils';
+import type { WabaMediaKind } from '../../lib/wabaApi';
 
 const CHAT_SELECT = '*, waba_contacts(*, clientes(id, nome))';
 
@@ -124,6 +128,8 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const [feedback, setFeedback] = useState<Feedback>(null);
   /** Gravação de voz em andamento — o campo de texto cede o lugar à barra. */
   const [voiceActive, setVoiceActive] = useState(false);
+  /** Arquivo escolhido no `+`, aguardando confirmação no preview. */
+  const [pendingAttachment, setPendingAttachment] = useState<{ kind: WabaMediaKind; file: File } | null>(null);
   /** Texto salvo quando a janela fecha no meio do envio — volta se ela reabrir. */
   const [recoveredDraft, setRecoveredDraft] = useState('');
   // Menu do header no mobile (telefone e ficha do cliente saíram da barra).
@@ -340,6 +346,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
     setFeedback(null);
     // O recorder remonta com o chat (key) e não consegue avisar — reset manual.
     setVoiceActive(false);
+    setPendingAttachment(null);
     loadMessages(chatId);
   }, [loadMessages]);
 
@@ -608,7 +615,10 @@ export const WabaView: React.FC<WabaViewProps> = ({
 
     setDraft('');
     startSend(selectedChat.id, { kind: 'text', text });
-    textareaRef.current?.focus();
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'; // volta à altura de 1 linha
+      textareaRef.current.focus();
+    }
   };
 
   const handleSendTemplate = (template: WabaTemplate, variables: string[]) => {
@@ -653,6 +663,63 @@ export const WabaView: React.FC<WabaViewProps> = ({
   };
 
   const handleVoiceActiveChange = useCallback((active: boolean) => setVoiceActive(active), []);
+
+  /**
+   * Envio de imagem/documento a partir do preview. Sem mensagem otimista — o
+   * proxy grava e a linha chega pelo realtime, como no áudio.
+   *
+   * Devolve `null` em sucesso e a mensagem de erro em falha: o erro é exibido
+   * dentro do próprio preview, porque o banner do composer ficaria escondido
+   * atrás do overlay.
+   */
+  const handleSendMedia = async (caption: string): Promise<string | null> => {
+    if (!selectedChat || !pendingAttachment) return 'Não foi possível enviar o arquivo.';
+    const { kind, file } = pendingAttachment;
+
+    let base64: string;
+    try {
+      base64 = await fileToBase64(file);
+    } catch {
+      return 'Não foi possível preparar o arquivo para envio.';
+    }
+
+    const result = await wabaApi.sendMedia(
+      selectedChat.id,
+      kind,
+      base64,
+      file.type || 'application/octet-stream',
+      caption || undefined,
+      kind === 'document' ? file.name : undefined
+    );
+
+    if (result.success) {
+      setPendingAttachment(null);
+      return null;
+    }
+
+    switch (result.error_code) {
+      case 'WINDOW_CLOSED':
+        // O preview fecha junto: com a janela fechada só resta template.
+        setPendingAttachment(null);
+        await reloadSelectedChat(selectedChat.id);
+        setNow(Date.now());
+        setFeedback({
+          type: 'error',
+          text: 'A janela de 24h fechou e o arquivo não foi enviado. Só é possível enviar um template aprovado.',
+        });
+        return null;
+      case 'RATE_LIMITED':
+        return 'Limite de envio atingido. Tente novamente em instantes.';
+      default:
+        return result.message || 'Não foi possível enviar o arquivo.';
+    }
+  };
+
+  /** Cresce até ~5 linhas; depois disso o scroll é interno. */
+  const autoGrowTextarea = (el: HTMLTextAreaElement) => {
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+  };
 
   /** Nova tentativa a partir de uma mensagem que falhou. */
   const handleRetry = (message: LocalMessage) => {
@@ -1054,11 +1121,12 @@ export const WabaView: React.FC<WabaViewProps> = ({
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Composer — alterna conforme a janela de 24h */}
+              {/* Composer — alterna conforme a janela de 24h. Flutua sobre o
+                  fundo da conversa, sem grudar na borda inferior. */}
               <div
-                className="border-t border-slate-200 p-3 flex-shrink-0"
+                className="bg-slate-50 px-2 md:px-3 pt-1.5 pb-2 flex-shrink-0"
                 // Sem isto o composer fica atrás da barra inferior do iPhone.
-                style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+                style={{ paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}
               >
                 {feedback && (
                   <div
@@ -1075,32 +1143,42 @@ export const WabaView: React.FC<WabaViewProps> = ({
                 )}
 
                 {windowState.open ? (
-                  <div className="flex items-end gap-2">
+                  <div className="flex items-end gap-1.5">
+                    {!voiceActive && (
+                      <WabaAttachMenu
+                        isMobile={isMobile}
+                        onPick={(kind, file) => setPendingAttachment({ kind, file })}
+                        onError={text => setFeedback({ type: 'error', text })}
+                      />
+                    )}
                     {!voiceActive && (
                       <textarea
                         ref={textareaRef}
                         value={draft}
-                        onChange={e => setDraft(e.target.value)}
+                        onChange={e => {
+                          setDraft(e.target.value);
+                          autoGrowTextarea(e.currentTarget);
+                        }}
                         onKeyDown={e => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             handleSendText();
                           }
                         }}
-                        placeholder="Escreva uma mensagem..."
-                        rows={2}
+                        placeholder="Mensagem"
+                        rows={1}
                         // text-base no mobile: abaixo de 16px o iOS dá zoom ao focar.
-                        className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-base md:text-sm resize-none"
+                        className="flex-1 min-w-0 bg-white border border-slate-200 rounded-3xl px-4 py-2.5 min-h-[44px] max-h-[140px] text-base md:text-sm resize-none shadow-sm overflow-y-auto"
                       />
                     )}
                     {/* Estilo WhatsApp: com texto, enviar; campo vazio, microfone. */}
                     {!voiceActive && draft.trim() && (
                       <button
                         onClick={handleSendText}
-                        className="flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] bg-[#0C447C] text-white rounded-lg text-sm font-medium hover:bg-[#0a3a68] transition-colors flex-shrink-0"
+                        aria-label="Enviar mensagem"
+                        className="flex items-center justify-center w-11 h-11 rounded-full bg-[#0C447C] text-white hover:bg-[#0a3a68] transition-colors flex-shrink-0"
                       >
-                        <Send size={15} />
-                        <span className="hidden sm:inline">Enviar</span>
+                        <Send size={19} />
                       </button>
                     )}
                     <WabaVoiceRecorder
@@ -1137,6 +1215,16 @@ export const WabaView: React.FC<WabaViewProps> = ({
         </div>
         )}
       </div>
+
+      {/* Preview de imagem/documento antes do envio */}
+      {pendingAttachment && (
+        <WabaMediaSendPreview
+          kind={pendingAttachment.kind}
+          file={pendingAttachment.file}
+          onSend={handleSendMedia}
+          onCancel={() => setPendingAttachment(null)}
+        />
+      )}
     </div>
   );
 };

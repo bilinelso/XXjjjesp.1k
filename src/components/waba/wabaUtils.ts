@@ -147,6 +147,23 @@ export function documentFileName(text: string | null | undefined): string {
   return match ? match[1].trim() : 'Documento';
 }
 
+/** Blob/File → base64 puro (sem o prefixo `data:...;base64,`). */
+export function fileToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** `1536000` → `1,5 MB` */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace('.', ',')} MB`;
+}
+
 export function formatMediaDuration(seconds: number): string {
   if (!seconds || Number.isNaN(seconds) || !Number.isFinite(seconds)) return '0:00';
   const m = Math.floor(seconds / 60);
