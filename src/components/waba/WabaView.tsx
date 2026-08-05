@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BadgeCheck, Search, AlertTriangle, Clock, User, Send, ExternalLink, MessageSquare, ArrowLeft, MoreVertical, Copy, RotateCw } from 'lucide-react';
+import { BadgeCheck, Search, AlertTriangle, Clock, User, Send, ExternalLink, MessageSquare, ArrowLeft, MoreVertical, Copy, RotateCw, RefreshCw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -17,6 +17,7 @@ import {
   formatMessageTime,
   formatRelativeTime,
   formatRemaining,
+  formatTimeAgo,
   formatWabaPhone,
   messageStatusLabel,
   resolveChatName,
@@ -28,6 +29,10 @@ const CHAT_SELECT = '*, waba_contacts(*, clientes(id, nome))';
 type WabaViewProps = {
   onUnreadCountChange?: (count: number) => void;
   onOpenCliente?: (clienteId: string) => void;
+  /** Conversa a abrir ao chegar de fora (menu do telefone). */
+  openChatId?: string | null;
+  /** Avisa o App para limpar o `openChatId` e não reabrir a cada re-render. */
+  onOpenChatHandled?: () => void;
 };
 
 type Feedback = { type: 'error' | 'info' | 'success'; text: string } | null;
@@ -93,10 +98,17 @@ function upsertMessage(prev: LocalMessage[], incoming: WabaMessage): LocalMessag
   );
 }
 
-export const WabaView: React.FC<WabaViewProps> = ({ onUnreadCountChange, onOpenCliente }) => {
-  const { user } = useAuth();
+export const WabaView: React.FC<WabaViewProps> = ({
+  onUnreadCountChange,
+  onOpenCliente,
+  openChatId,
+  onOpenChatHandled,
+}) => {
+  const { user, profile } = useAuth();
   // Abaixo de `md` o módulo vira coluna única: ou a lista, ou a conversa.
   const isMobile = !useMediaQuery(MD_QUERY);
+  // Sincronizar template é configuração, não atendimento.
+  const isMaster = !!profile?.is_master;
 
   const [chats, setChats] = useState<WabaChatWithContact[]>([]);
   const [messages, setMessages] = useState<LocalMessage[]>([]);
@@ -111,6 +123,10 @@ export const WabaView: React.FC<WabaViewProps> = ({ onUnreadCountChange, onOpenC
   const [recoveredDraft, setRecoveredDraft] = useState('');
   // Menu do header no mobile (telefone e ficha do cliente saíram da barra).
   const [menuOpen, setMenuOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<Feedback>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [lastSyncLoaded, setLastSyncLoaded] = useState(false);
   // A janela de 24h pode virar com a tela aberta — este relógio força o recálculo.
   const [now, setNow] = useState(() => Date.now());
 
@@ -166,11 +182,51 @@ export const WabaView: React.FC<WabaViewProps> = ({ onUnreadCountChange, onOpenC
     setLoadingMessages(false);
   }, []);
 
+  /** Quando a Meta foi espelhada pela última vez — vale para qualquer status. */
+  const loadLastSyncedAt = useCallback(async () => {
+    const { data } = await supabase
+      .from('waba_templates')
+      .select('synced_at')
+      .order('synced_at', { ascending: false })
+      .limit(1);
+
+    const row = (data || [])[0] as { synced_at?: string | null } | undefined;
+    setLastSyncedAt(row?.synced_at || null);
+    setLastSyncLoaded(true);
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     loadChats();
     loadTemplates();
-  }, [user, loadChats, loadTemplates]);
+    loadLastSyncedAt();
+  }, [user, loadChats, loadTemplates, loadLastSyncedAt]);
+
+  const handleSyncTemplates = async () => {
+    if (syncing) return;
+
+    setSyncing(true);
+    setSyncFeedback(null);
+    const result = await wabaApi.syncTemplates();
+
+    if (!result.success) {
+      setSyncFeedback({ type: 'error', text: result.error });
+      setSyncing(false);
+      return;
+    }
+
+    const approved = result.por_status?.APPROVED ?? 0;
+    setSyncFeedback({
+      type: 'success',
+      text: `${result.sincronizados} template(s) sincronizado(s) · ${approved} aprovado(s)${
+        result.marcados_removidos > 0 ? ` · ${result.marcados_removidos} removido(s) na Meta` : ''
+      }`,
+    });
+    setLastSyncedAt(result.synced_at);
+    setLastSyncLoaded(true);
+    await loadTemplates();
+    setSyncing(false);
+  };
 
   // ── Realtime ───────────────────────────────────────────────────────────────
   // UM canal só para o módulo, com callbacks para as duas tabelas.
@@ -270,15 +326,52 @@ export const WabaView: React.FC<WabaViewProps> = ({ onUnreadCountChange, onOpenC
 
   // A zeragem do unread_count fica no efeito acima, que também cobre mensagens
   // que chegam com a conversa já aberta.
-  const handleSelectChat = (chat: WabaChatWithContact) => {
-    setSelectedChatId(chat.id);
-    selectedChatIdRef.current = chat.id;
+  const selectChat = useCallback((chatId: string) => {
+    setSelectedChatId(chatId);
+    selectedChatIdRef.current = chatId;
     setMessages([]);
     setDraft('');
     setRecoveredDraft('');
     setFeedback(null);
-    loadMessages(chat.id);
-  };
+    loadMessages(chatId);
+  }, [loadMessages]);
+
+  const handleSelectChat = (chat: WabaChatWithContact) => selectChat(chat.id);
+
+  /**
+   * Abre uma conversa vinda de fora do módulo (menu do telefone).
+   *
+   * A conversa pode ter acabado de ser criada pela RPC e não estar em `chats` —
+   * daí o SELECT antes de selecionar, senão a tela abriria vazia.
+   */
+  useEffect(() => {
+    if (!openChatId || !user) return;
+    let cancelled = false;
+
+    (async () => {
+      const { data } = await supabase
+        .from('waba_chats')
+        .select(CHAT_SELECT)
+        .eq('id', openChatId)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      if (data) {
+        const chat = data as WabaChatWithContact;
+        setChats(prev =>
+          prev.some(c => c.id === chat.id)
+            ? prev.map(c => (c.id === chat.id ? chat : c))
+            : [chat, ...prev]
+        );
+      }
+
+      selectChat(openChatId);
+      onOpenChatHandled?.();
+    })();
+
+    return () => { cancelled = true; };
+  }, [openChatId, user, selectChat, onOpenChatHandled]);
 
   // No celular, abrir uma conversa empilha uma entrada de histórico: o botão
   // voltar do aparelho retorna à lista em vez de sair do módulo. A URL não muda
@@ -515,16 +608,77 @@ export const WabaView: React.FC<WabaViewProps> = ({ onUnreadCountChange, onOpenC
   const showList = !isMobile || selectedChatId === null;
   const showConversation = !isMobile || selectedChatId !== null;
 
+  // Mesmo botão no cabeçalho do módulo e no aviso do modo template — os dois
+  // compartilham o estado de `syncing`, então nunca divergem.
+  const syncButton = (
+    <button
+      onClick={handleSyncTemplates}
+      disabled={syncing}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 min-h-[36px] rounded-lg text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+    >
+      <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
+      {syncing ? 'Sincronizando...' : 'Sincronizar templates'}
+    </button>
+  );
+
+  /** O texto depende de quem está vendo: master resolve, assessor pede. */
+  const templateEmptyState = isMaster ? (
+    <div className="space-y-2">
+      <p className="text-sm text-slate-600">
+        Nenhum template aprovado no CRM. Os templates são criados e aprovados na Meta e só
+        aparecem aqui depois de sincronizados.
+      </p>
+      <div>{syncButton}</div>
+      {syncFeedback && (
+        <p className={`text-xs ${syncFeedback.type === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>
+          {syncFeedback.text}
+        </p>
+      )}
+    </div>
+  ) : (
+    <p className="text-sm text-slate-600">
+      Nenhum template aprovado disponível. Peça a um administrador para sincronizar os
+      templates aprovados na Meta.
+    </p>
+  );
+
   return (
     // 100dvh porque no iOS o 100vh ignora a barra do Safari e esconde o composer.
     // Mobile desconta só a barra superior; no desktop o espaçamento é o de antes.
     <div className="h-[calc(100dvh-52px)] lg:h-[calc(100dvh-180px)] flex flex-col">
       {showList && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-slate-200 flex-shrink-0">
-          <BadgeCheck size={16} className="text-emerald-600" />
-          <span className="text-sm font-medium text-slate-700">WhatsApp Oficial (API)</span>
-          <span className="text-xs text-slate-400">+55 11 93623-5989</span>
-        </div>
+        <>
+          <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-slate-200 flex-shrink-0">
+            <BadgeCheck size={16} className="text-emerald-600" />
+            <span className="text-sm font-medium text-slate-700">WhatsApp Oficial (API)</span>
+            <span className="text-xs text-slate-400">+55 11 93623-5989</span>
+
+            {isMaster && (
+              <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+                {lastSyncLoaded && (
+                  <span className="text-[11px] text-slate-400 whitespace-nowrap hidden sm:inline">
+                    {lastSyncedAt
+                      ? `Templates: ${formatTimeAgo(lastSyncedAt)}`
+                      : 'Templates: nunca sincronizado'}
+                  </span>
+                )}
+                {syncButton}
+              </div>
+            )}
+          </div>
+
+          {isMaster && syncFeedback && (
+            <div
+              className={`px-4 py-2 text-xs border-b flex-shrink-0 ${
+                syncFeedback.type === 'error'
+                  ? 'bg-red-50 text-red-700 border-red-200'
+                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+              }`}
+            >
+              {syncFeedback.text}
+            </div>
+          )}
+        </>
       )}
 
       <div className="flex-1 flex min-h-0 bg-white border border-t-0 border-slate-200 md:rounded-b-lg overflow-hidden">
@@ -741,8 +895,10 @@ export const WabaView: React.FC<WabaViewProps> = ({ onUnreadCountChange, onOpenC
                 {loadingMessages ? (
                   <p className="text-sm text-slate-400">Carregando mensagens...</p>
                 ) : messages.length === 0 ? (
-                  <p className="text-sm text-slate-400 text-center mt-6">
-                    Nenhuma mensagem nesta conversa ainda.
+                  <p className="text-sm text-slate-400 text-center mt-6 max-w-sm mx-auto">
+                    {selectedChat.waba_contacts?.last_inbound_at
+                      ? 'Nenhuma mensagem nesta conversa ainda.'
+                      : 'Nenhuma mensagem ainda. Como o cliente nunca escreveu para o número oficial, o primeiro contato precisa ser um template aprovado.'}
                   </p>
                 ) : (
                   messages.map(message => {
@@ -876,6 +1032,7 @@ export const WabaView: React.FC<WabaViewProps> = ({ onUnreadCountChange, onOpenC
                       templates={templates}
                       sending={false}
                       onSend={handleSendTemplate}
+                      emptyState={templateEmptyState}
                     />
                   </div>
                 )}

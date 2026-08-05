@@ -82,6 +82,26 @@ export function formatRelativeTime(timestamp: string | null | undefined): string
   return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** "há 2 horas" — usado no rótulo da última sincronização de templates. */
+export function formatTimeAgo(timestamp: string | null | undefined): string {
+  if (!timestamp) return '';
+  const then = new Date(timestamp).getTime();
+  if (Number.isNaN(then)) return '';
+
+  const minutes = Math.floor((Date.now() - then) / 60000);
+  if (minutes < 1) return 'agora mesmo';
+  if (minutes < 60) return `há ${minutes} minuto${minutes > 1 ? 's' : ''}`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} hora${hours > 1 ? 's' : ''}`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `há ${days} dia${days > 1 ? 's' : ''}`;
+
+  const months = Math.floor(days / 30);
+  return months > 1 ? `há ${months} meses` : 'há 1 mês';
+}
+
 export function formatMessageTime(timestamp: string | null | undefined): string {
   if (!timestamp) return '';
   const date = new Date(timestamp);

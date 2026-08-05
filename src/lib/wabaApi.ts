@@ -73,7 +73,83 @@ async function wabaProxy(payload: SendTextPayload | SendTemplatePayload): Promis
   };
 }
 
+// ── Abertura de conversa ─────────────────────────────────────────────────────
+// A RPC `waba_open_chat` devolve a thread do par (contato, assessor) — a
+// existente ou uma recém-criada — e aplica sozinha a regra de permissão usando
+// o usuário da sessão. A regra NÃO é replicada aqui de propósito: duplicada,
+// as duas versões divergiriam com o tempo.
+
+export type WabaOpenChatResult =
+  | { success: true; chat_id: string }
+  | { success: false; message: string };
+
+/** A RPC levanta exceção; o código vem dentro de `error.message`. */
+const OPEN_CHAT_MESSAGES: Record<string, string> = {
+  WABA_SEM_PERMISSAO: 'Este cliente está atribuído a outro assessor.',
+  WABA_CLIENTE_SEM_TELEFONE: 'Este cliente não tem telefone cadastrado.',
+  WABA_SEM_NUMERO_ATIVO: 'Nenhum número oficial configurado. Fale com o administrador.',
+  WABA_NOT_AUTHENTICATED: 'Sessão expirada. Entre novamente.',
+};
+
+const OPEN_CHAT_FALLBACK = 'Não foi possível abrir a conversa.';
+
+// ── Sincronização de templates ───────────────────────────────────────────────
+// A `waba-sync-templates` espelha os templates da Meta em `waba_templates`. Não
+// há agendamento: template aprovado na Meta só aparece no CRM depois disto.
+
+export interface WabaSyncTemplatesSuccess {
+  success: true;
+  sincronizados: number;
+  por_status: Record<string, number>;
+  marcados_removidos: number;
+  synced_at: string;
+}
+
+export type WabaSyncTemplatesResult = WabaSyncTemplatesSuccess | { success: false; error: string };
+
+const SYNC_FALLBACK = 'Não foi possível sincronizar os templates.';
+
 export const wabaApi = {
+  async syncTemplates(): Promise<WabaSyncTemplatesResult> {
+    const { data, error } = await supabase.functions.invoke('waba-sync-templates', {
+      method: 'POST',
+    });
+
+    if (error) {
+      // Em resposta não-2xx o supabase-js não popula `data`: o corpo com a
+      // mensagem real da Graph API fica no Response dentro de `error.context`.
+      const context = (error as { context?: unknown }).context;
+      if (context instanceof Response) {
+        const body = (await context.json().catch(() => null)) as { error?: string } | null;
+        if (body?.error) return { success: false, error: body.error };
+      }
+      return { success: false, error: error.message || SYNC_FALLBACK };
+    }
+
+    // 200 com `success: false` também é falha.
+    if (data && typeof data === 'object' && 'success' in data) {
+      const body = data as WabaSyncTemplatesResult;
+      return body.success ? body : { success: false, error: body.error || SYNC_FALLBACK };
+    }
+
+    return { success: false, error: SYNC_FALLBACK };
+  },
+
+  async openChat(cliente_id: string): Promise<WabaOpenChatResult> {
+    const { data, error } = await supabase.rpc('waba_open_chat', { p_cliente_id: cliente_id });
+
+    if (error) {
+      const code = Object.keys(OPEN_CHAT_MESSAGES).find(key => error.message?.includes(key));
+      return { success: false, message: code ? OPEN_CHAT_MESSAGES[code] : OPEN_CHAT_FALLBACK };
+    }
+
+    if (typeof data !== 'string' || data.length === 0) {
+      return { success: false, message: OPEN_CHAT_FALLBACK };
+    }
+
+    return { success: true, chat_id: data };
+  },
+
   sendText(chat_id: string, text: string): Promise<WabaSendResult> {
     return wabaProxy({ action: 'send_text', chat_id, text });
   },
@@ -135,6 +211,7 @@ export interface WabaTemplate {
   language: string;
   status: string;
   components: unknown;
+  synced_at?: string | null;
 }
 
 /** Chat com o contato (e cliente vinculado) embutidos pelo PostgREST. */

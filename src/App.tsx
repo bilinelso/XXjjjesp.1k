@@ -225,6 +225,7 @@ function AppContent() {
   const [whatsappUnread, setWhatsappUnread] = useState(0);
   // Contagem do módulo WABA (WhatsApp oficial) — independente do badge do módulo QR.
   const [wabaUnread, setWabaUnread] = useState(0);
+  const [wabaOpenChatId, setWabaOpenChatId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Na gaveta do mobile o modo colapsado não faz sentido — ela é sempre completa.
   const navCollapsed = isDesktop && sidebarCollapsed;
@@ -240,6 +241,16 @@ function AppContent() {
     setShowModal(false);
     setView('whatsapp');
   };
+
+  /** Vem do menu do telefone com o chat já resolvido pela RPC `waba_open_chat`. */
+  const handleOpenWabaChat = (chatId: string) => {
+    setWabaOpenChatId(chatId);
+    setSelectedCliente(null);
+    setShowModal(false);
+    setView('waba');
+  };
+
+  const handleWabaOpenChatHandled = useCallback(() => setWabaOpenChatId(null), []);
 
   const { clientes, loading, filtrarClientes, updateCliente, fetchClientes, createCliente } = useClientes();
   const { fetchAllAgendamentos, deleteAgendamento } = useAgendamentos();
@@ -2907,6 +2918,7 @@ function AppContent() {
           clientes={clientes}
           assessores={assessoresDisponiveis}
           onOpenWhatsApp={handleOpenWhatsApp}
+          onOpenWabaChat={handleOpenWabaChat}
           onSelectCliente={c => { setSelectedCliente(c); setShowModal(true); }}
         />
       )}
@@ -3069,6 +3081,8 @@ function AppContent() {
         <WabaView
           onUnreadCountChange={setWabaUnread}
           onOpenCliente={handleOpenClienteFromWaba}
+          openChatId={wabaOpenChatId}
+          onOpenChatHandled={handleWabaOpenChatHandled}
         />
       </div>
 
@@ -3403,6 +3417,7 @@ function AppContent() {
           onRemoveAgendamento={handleRemoveAgendamento}
           onUpdateAgendamento={handleUpdateAgendamento}
           onOpenWhatsApp={handleOpenWhatsApp}
+          onOpenWabaChat={handleOpenWabaChat}
         />
       )}
 

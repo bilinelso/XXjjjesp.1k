@@ -7,9 +7,12 @@ type WabaTemplatePickerProps = {
   templates: WabaTemplate[];
   sending: boolean;
   onSend: (template: WabaTemplate, variables: string[]) => void;
+  /** Substitui o texto padrão quando não há template aprovado — o que dizer
+   *  depende de o usuário poder sincronizar ou não. */
+  emptyState?: React.ReactNode;
 };
 
-export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ templates, sending, onSend }) => {
+export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ templates, sending, onSend, emptyState }) => {
   const [selectedId, setSelectedId] = useState<string>('');
   const [values, setValues] = useState<Record<number, string>>({});
 
@@ -33,9 +36,14 @@ export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ template
 
   if (templates.length === 0) {
     return (
-      <p className="text-sm text-slate-500">
-        Nenhum template aprovado disponível. Os templates são criados e aprovados na Meta e sincronizados automaticamente.
-      </p>
+      <>
+        {emptyState ?? (
+          <p className="text-sm text-slate-500">
+            Nenhum template aprovado disponível. Os templates são criados e aprovados na Meta
+            e precisam ser sincronizados no CRM.
+          </p>
+        )}
+      </>
     );
   }
 

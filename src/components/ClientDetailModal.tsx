@@ -13,6 +13,7 @@ import { AssessorSelect } from './AssessorSelect';
 import { capitalizeName } from '../utils/formatters';
 import { DepositoHistoricoModal } from './DepositoHistoricoModal';
 import { WabaClientHistory } from './waba/WabaClientHistory';
+import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
 
 type ClientDetailModalProps = {
   cliente: Cliente;
@@ -23,6 +24,7 @@ type ClientDetailModalProps = {
   onRemoveAgendamento?: (agendamentoId: string) => void;
   onUpdateAgendamento?: (agendamentoId: string, updates: Partial<Agendamento>) => void;
   onOpenWhatsApp?: (phone: string) => void;
+  onOpenWabaChat?: (chatId: string) => void;
   autoOpenAgendamento?: boolean;
 };
 
@@ -64,6 +66,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   onAddAgendamento,
   onRemoveAgendamento,
   onOpenWhatsApp,
+  onOpenWabaChat,
   autoOpenAgendamento,
 }) => {
   const [editMode, setEditMode] = useState(false);
@@ -528,13 +531,15 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                   <div>
                     <p className="text-sm text-gray-600">Telefone</p>
                     {cliente.telefone ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenWhatsApp?.(cliente.telefone!)}
+                      <WhatsAppChannelMenu
+                        clienteId={cliente.id}
+                        telefone={cliente.telefone}
+                        onOpenQr={phone => onOpenWhatsApp?.(phone)}
+                        onOpenWaba={chatId => onOpenWabaChat?.(chatId)}
                         className="font-semibold text-green-600 hover:text-green-700 hover:underline transition-colors inline-flex items-center gap-1"
                       >
                         📱 {cliente.telefone}
-                      </button>
+                      </WhatsAppChannelMenu>
                     ) : (
                       <p className="font-semibold"></p>
                     )}

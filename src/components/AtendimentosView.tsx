@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Search, MessageCircle, ChevronDown, X } from 'lucide-react';
 import { DatePicker } from './DatePicker';
+import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { evolutionApi } from '../lib/evolutionApi';
@@ -10,6 +11,7 @@ interface AtendimentosViewProps {
   clientes: Cliente[];
   assessores: { id: string; nome: string }[];
   onOpenWhatsApp: (phone: string) => void;
+  onOpenWabaChat: (chatId: string) => void;
   onSelectCliente: (cliente: Cliente) => void;
 }
 
@@ -202,7 +204,7 @@ function applyVars(template: string, c: Cliente): string {
     .replace(/\{assessor\}/g, c.assessor || '');
 }
 
-export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onSelectCliente }: AtendimentosViewProps) {
+export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenWabaChat, onSelectCliente }: AtendimentosViewProps) {
   const { profile } = useAuth();
 
   const [selectedAssessor, setSelectedAssessor] = useState('');
@@ -560,13 +562,18 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onSelec
           className="flex-shrink-0 flex flex-col gap-1 items-stretch"
           onClick={e => e.stopPropagation()}
         >
-          <button
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors"
-            onClick={() => c.telefone && onOpenWhatsApp(c.telefone)}
-          >
-            <MessageCircle size={13} />
-            WhatsApp
-          </button>
+          {c.telefone && (
+            <WhatsAppChannelMenu
+              clienteId={c.id}
+              telefone={c.telefone}
+              onOpenQr={onOpenWhatsApp}
+              onOpenWaba={onOpenWabaChat}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-green-50 text-green-700 border border-green-200 hover:bg-green-100 transition-colors"
+            >
+              <MessageCircle size={13} />
+              WhatsApp
+            </WhatsAppChannelMenu>
+          )}
 
           <div
             className="relative"
@@ -843,16 +850,18 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onSelec
 
             {/* Footer */}
             <div className="px-4 py-3 border-t border-slate-100">
-              <button
-                onClick={() => {
-                  setPreviewCliente(null);
-                  if (previewCliente.telefone) onOpenWhatsApp(previewCliente.telefone);
-                }}
-                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
-              >
-                <MessageCircle size={15} />
-                Abrir conversa completa
-              </button>
+              {previewCliente.telefone ? (
+                <WhatsAppChannelMenu
+                  clienteId={previewCliente.id}
+                  telefone={previewCliente.telefone}
+                  onOpenQr={phone => { setPreviewCliente(null); onOpenWhatsApp(phone); }}
+                  onOpenWaba={chatId => { setPreviewCliente(null); onOpenWabaChat(chatId); }}
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
+                >
+                  <MessageCircle size={15} />
+                  Abrir conversa completa
+                </WhatsAppChannelMenu>
+              ) : null}
             </div>
           </div>
         </div>
