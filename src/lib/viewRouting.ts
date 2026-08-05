@@ -48,7 +48,7 @@ export const ALL_VIEWS: ViewType[] = [
  * do mobile e a guarda de rota derivam daqui. As demais telas continuam
  * existindo e acessíveis no desktop; só não aparecem no menu do celular.
  */
-export const MOBILE_VIEWS: ViewType[] = ['waba', 'leads', 'atendimentos'];
+export const MOBILE_VIEWS: ViewType[] = ['waba', 'leads'];
 
 /** Tailwind `lg`. Abaixo disso a sidebar vira gaveta. */
 export const LG_QUERY = '(min-width: 1024px)';
