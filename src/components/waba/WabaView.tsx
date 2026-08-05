@@ -25,6 +25,7 @@ import {
   WINDOW_WARNING_MS,
 } from './wabaUtils';
 import { WabaMessageMedia } from './WabaMessageMedia';
+import { WabaVoiceRecorder } from './WabaVoiceRecorder';
 
 const CHAT_SELECT = '*, waba_contacts(*, clientes(id, nome))';
 
@@ -121,6 +122,8 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [draft, setDraft] = useState('');
   const [feedback, setFeedback] = useState<Feedback>(null);
+  /** Gravação de voz em andamento — o campo de texto cede o lugar à barra. */
+  const [voiceActive, setVoiceActive] = useState(false);
   /** Texto salvo quando a janela fecha no meio do envio — volta se ela reabrir. */
   const [recoveredDraft, setRecoveredDraft] = useState('');
   // Menu do header no mobile (telefone e ficha do cliente saíram da barra).
@@ -335,6 +338,8 @@ export const WabaView: React.FC<WabaViewProps> = ({
     setDraft('');
     setRecoveredDraft('');
     setFeedback(null);
+    // O recorder remonta com o chat (key) e não consegue avisar — reset manual.
+    setVoiceActive(false);
     loadMessages(chatId);
   }, [loadMessages]);
 
@@ -610,6 +615,44 @@ export const WabaView: React.FC<WabaViewProps> = ({
     if (!selectedChat) return;
     startSend(selectedChat.id, { kind: 'template', template, variables });
   };
+
+  /**
+   * Envio da nota de voz. Sem mensagem otimista: o proxy grava no banco e a
+   * linha chega pelo canal realtime existente. Devolve `false` em falha para o
+   * recorder preservar o preview e permitir nova tentativa.
+   */
+  const handleSendVoice = async (
+    base64: string,
+    mimeType: string,
+    durationSeconds: number
+  ): Promise<boolean> => {
+    if (!selectedChat) return false;
+
+    setFeedback(null);
+    const result = await wabaApi.sendAudio(selectedChat.id, base64, mimeType, durationSeconds);
+    if (result.success) return true;
+
+    switch (result.error_code) {
+      case 'WINDOW_CLOSED':
+        // Recarregar o contato vira o composer para modo template; o recorder
+        // desmonta junto e libera o microfone.
+        await reloadSelectedChat(selectedChat.id);
+        setNow(Date.now());
+        setFeedback({
+          type: 'error',
+          text: 'A janela de 24h fechou e o áudio não foi enviado. Só é possível enviar um template aprovado.',
+        });
+        break;
+      case 'RATE_LIMITED':
+        setFeedback({ type: 'error', text: 'Limite de envio atingido. Tente novamente em instantes.' });
+        break;
+      default:
+        setFeedback({ type: 'error', text: result.message || 'Não foi possível enviar o áudio.' });
+    }
+    return false;
+  };
+
+  const handleVoiceActiveChange = useCallback((active: boolean) => setVoiceActive(active), []);
 
   /** Nova tentativa a partir de uma mensagem que falhou. */
   const handleRetry = (message: LocalMessage) => {
@@ -1033,29 +1076,40 @@ export const WabaView: React.FC<WabaViewProps> = ({
 
                 {windowState.open ? (
                   <div className="flex items-end gap-2">
-                    <textarea
-                      ref={textareaRef}
-                      value={draft}
-                      onChange={e => setDraft(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendText();
-                        }
-                      }}
-                      placeholder="Escreva uma mensagem..."
-                      rows={2}
-                      // text-base no mobile: abaixo de 16px o iOS dá zoom ao focar.
-                      className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-base md:text-sm resize-none"
+                    {!voiceActive && (
+                      <textarea
+                        ref={textareaRef}
+                        value={draft}
+                        onChange={e => setDraft(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendText();
+                          }
+                        }}
+                        placeholder="Escreva uma mensagem..."
+                        rows={2}
+                        // text-base no mobile: abaixo de 16px o iOS dá zoom ao focar.
+                        className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-base md:text-sm resize-none"
+                      />
+                    )}
+                    {/* Estilo WhatsApp: com texto, enviar; campo vazio, microfone. */}
+                    {!voiceActive && draft.trim() && (
+                      <button
+                        onClick={handleSendText}
+                        className="flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] bg-[#0C447C] text-white rounded-lg text-sm font-medium hover:bg-[#0a3a68] transition-colors flex-shrink-0"
+                      >
+                        <Send size={15} />
+                        <span className="hidden sm:inline">Enviar</span>
+                      </button>
+                    )}
+                    <WabaVoiceRecorder
+                      key={selectedChat.id}
+                      showMic={!draft.trim()}
+                      onSend={handleSendVoice}
+                      onError={text => setFeedback({ type: 'error', text })}
+                      onActiveChange={handleVoiceActiveChange}
                     />
-                    <button
-                      onClick={handleSendText}
-                      disabled={!draft.trim()}
-                      className="flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] bg-[#0C447C] text-white rounded-lg text-sm font-medium hover:bg-[#0a3a68] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex-shrink-0"
-                    >
-                      <Send size={15} />
-                      <span className="hidden sm:inline">Enviar</span>
-                    </button>
                   </div>
                 ) : (
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">

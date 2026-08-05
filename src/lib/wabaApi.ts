@@ -18,6 +18,8 @@ export type WabaErrorCode =
 export interface WabaSendSuccess {
   success: true;
   wamid: string;
+  /** Presente no `send_audio`: URL da mídia já cacheada no Storage. */
+  media_url?: string;
 }
 
 export interface WabaSendError {
@@ -42,7 +44,17 @@ type SendTemplatePayload = {
   variables: string[];
 };
 
-async function wabaProxy(payload: SendTextPayload | SendTemplatePayload): Promise<WabaSendResult> {
+type SendAudioPayload = {
+  action: 'send_audio';
+  chat_id: string;
+  audio_base64: string;
+  mime_type: string;
+  duration_seconds: number;
+};
+
+async function wabaProxy(
+  payload: SendTextPayload | SendTemplatePayload | SendAudioPayload
+): Promise<WabaSendResult> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -161,6 +173,16 @@ export const wabaApi = {
     variables: string[]
   ): Promise<WabaSendResult> {
     return wabaProxy({ action: 'send_template', chat_id, template_name, language, variables });
+  },
+
+  /** Nota de voz OGG/Opus. O proxy grava a mensagem; ela chega pelo realtime. */
+  sendAudio(
+    chat_id: string,
+    audio_base64: string,
+    mime_type: string,
+    duration_seconds: number
+  ): Promise<WabaSendResult> {
+    return wabaProxy({ action: 'send_audio', chat_id, audio_base64, mime_type, duration_seconds });
   },
 };
 
