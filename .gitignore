@@ -22,5 +22,6 @@ dist-ssr
 *.sw?
 .env
 
+public/
 .claude/
 WEBHOOK_DEBUG.md
