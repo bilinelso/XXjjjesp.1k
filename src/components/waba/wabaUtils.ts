@@ -169,7 +169,7 @@ const JPEG_QUALITY = 0.85;
  */
 export async function imageFileToJpeg(
   file: File
-): Promise<{ base64: string; mimeType: 'image/jpeg' }> {
+): Promise<{ base64: string; mimeType: 'image/jpeg'; blob: Blob }> {
   const bitmap = await createImageBitmap(file);
 
   try {
@@ -197,7 +197,9 @@ export async function imageFileToJpeg(
       );
     });
 
-    return { base64: await fileToBase64(blob), mimeType: 'image/jpeg' };
+    // O blob volta junto: o balão otimista mostra o JPEG convertido — o mesmo
+    // conteúdo que o cliente vai receber, não o arquivo original.
+    return { base64: await fileToBase64(blob), mimeType: 'image/jpeg', blob };
   } finally {
     bitmap.close();
   }

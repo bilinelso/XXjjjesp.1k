@@ -47,7 +47,17 @@ type Feedback = { type: 'error' | 'info' | 'success'; text: string } | null;
 /** O que precisa ser guardado para reenviar uma mensagem que falhou. */
 type SendPayload =
   | { kind: 'text'; text: string }
-  | { kind: 'template'; template: WabaTemplate; variables: string[] };
+  | { kind: 'template'; template: WabaTemplate; variables: string[] }
+  | { kind: 'audio'; base64: string; mimeType: string; durationSeconds: number; blob: Blob }
+  | {
+      kind: 'media';
+      mediaKind: WabaMediaKind;
+      base64: string;
+      mimeType: string;
+      caption?: string;
+      filename?: string;
+      blob: Blob;
+    };
 
 /**
  * Mensagem na lista. Enquanto o `waba-proxy` não responde ela existe só no
@@ -58,6 +68,8 @@ type LocalMessage = WabaMessage & {
   localId?: string;
   pendingState?: 'sending' | 'failed';
   retry?: SendPayload;
+  /** Blob URL do arquivo local — preview da mídia até a `media_url` real chegar. */
+  localMediaUrl?: string;
 };
 
 /** Mesmo formato que o backend grava, para não haver salto visual na troca. */
@@ -65,8 +77,41 @@ function templateLogText(name: string, variables: string[]): string {
   return variables.length > 0 ? `[Template: ${name}] ${variables.join(' | ')}` : `[Template: ${name}]`;
 }
 
+/** Texto da mensagem otimista — o mesmo que o backend vai gravar. */
+function payloadText(payload: SendPayload): string {
+  switch (payload.kind) {
+    case 'text':
+      return payload.text;
+    case 'template':
+      return templateLogText(payload.template.name, payload.variables);
+    case 'audio':
+      return '[Mensagem de voz]';
+    case 'media':
+      if (payload.caption?.trim()) return payload.caption;
+      return payload.mediaKind === 'image'
+        ? '[Imagem]'
+        : `[Documento: ${payload.filename || 'arquivo'}]`;
+  }
+}
+
+/**
+ * Chave da trava de duplo clique. Texto/template usam o próprio texto; mídia
+ * usa uma impressão do base64 — os placeholders (`[Imagem]`) se repetem e
+ * travariam envios legítimos em sequência.
+ */
+function payloadGuardKey(chatId: string, payload: SendPayload): string {
+  if (payload.kind === 'text' || payload.kind === 'template') {
+    return `${chatId}::${payload.kind}::${payloadText(payload)}`;
+  }
+  return `${chatId}::${payload.kind}::${payload.base64.length}::${payload.base64.slice(0, 48)}`;
+}
+
 function newLocalId(): string {
   return `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function revokeLocalMedia(message: LocalMessage): void {
+  if (message.localMediaUrl) URL.revokeObjectURL(message.localMediaUrl);
 }
 
 /**
@@ -86,9 +131,14 @@ function upsertMessage(prev: LocalMessage[], incoming: WabaMessage): LocalMessag
 
   // Corrida: o INSERT pode chegar antes de o proxy devolver o `wamid`, e aí a
   // otimista ainda não tem por onde casar. Casa pelo texto para não piscar uma
-  // duplicata. Só uma otimista com o mesmo texto pode estar em voo por vez
-  // (ver `inFlightRef`), então não há ambiguidade.
-  if (index < 0 && incoming.from_me) {
+  // duplicata. SÓ para texto/template: mídia repete o placeholder (`[Imagem]`)
+  // e casar por ele trocaria a mídia errada — mídia reconcilia apenas por
+  // `wamid`, com a limpeza tardia no dispatchSend cobrindo esta corrida.
+  if (
+    index < 0 &&
+    incoming.from_me &&
+    (incoming.message_type === 'text' || incoming.message_type === 'template')
+  ) {
     index = prev.findIndex(
       m => m.pendingState === 'sending' && m.message_text === incoming.message_text
     );
@@ -96,7 +146,15 @@ function upsertMessage(prev: LocalMessage[], incoming: WabaMessage): LocalMessag
 
   if (index >= 0) {
     const next = [...prev];
-    next[index] = incoming;
+    const existing = prev[index];
+    if (existing.localMediaUrl && !incoming.media_url) {
+      // A linha real chegou antes da media_url (o webhook preenche via UPDATE).
+      // O preview local segura o lugar até a URL do Storage chegar.
+      next[index] = { ...incoming, localMediaUrl: existing.localMediaUrl };
+    } else {
+      revokeLocalMedia(existing);
+      next[index] = incoming;
+    }
     return next;
   }
 
@@ -146,6 +204,20 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   /** Única trava que sobrou: impede o duplo clique reenviar o mesmo texto. */
   const inFlightRef = useRef<Set<string>>(new Set());
+  /** Espelho de `messages` para a limpeza de blob URLs no desmonte. */
+  const messagesRef = useRef<LocalMessage[]>([]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  // Saída abrupta (troca de view, logout) não pode vazar os blob URLs das
+  // otimistas de mídia ainda na lista.
+  useEffect(() => {
+    return () => {
+      messagesRef.current.forEach(revokeLocalMedia);
+    };
+  }, []);
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
@@ -340,7 +412,11 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const selectChat = useCallback((chatId: string) => {
     setSelectedChatId(chatId);
     selectedChatIdRef.current = chatId;
-    setMessages([]);
+    setMessages(prev => {
+      // Blob URLs de otimistas do chat anterior não podem vazar.
+      prev.forEach(revokeLocalMedia);
+      return [];
+    });
     setDraft('');
     setRecoveredDraft('');
     setFeedback(null);
@@ -478,7 +554,13 @@ export const WabaView: React.FC<WabaViewProps> = ({
   };
 
   const dropOptimistic = (localId: string) => {
-    setMessages(prev => prev.filter(m => m.localId !== localId));
+    setMessages(prev =>
+      prev.filter(m => {
+        if (m.localId !== localId) return true;
+        revokeLocalMedia(m);
+        return false;
+      })
+    );
   };
 
   const handleSendFailure = async (
@@ -532,19 +614,42 @@ export const WabaView: React.FC<WabaViewProps> = ({
    * A UI já foi atualizada antes desta chamada — aqui só se resolve o desfecho.
    */
   const dispatchSend = async (chatId: string, payload: SendPayload, localId: string) => {
-    const guardKey = `${chatId}::${payload.kind === 'text' ? payload.text : templateLogText(payload.template.name, payload.variables)}`;
+    const guardKey = payloadGuardKey(chatId, payload);
     inFlightRef.current.add(guardKey);
 
     try {
-      const result =
-        payload.kind === 'text'
-          ? await wabaApi.sendText(chatId, payload.text)
-          : await wabaApi.sendTemplate(
-              chatId,
-              payload.template.name,
-              payload.template.language,
-              payload.variables
-            );
+      let result: WabaSendResult;
+      switch (payload.kind) {
+        case 'text':
+          result = await wabaApi.sendText(chatId, payload.text);
+          break;
+        case 'template':
+          result = await wabaApi.sendTemplate(
+            chatId,
+            payload.template.name,
+            payload.template.language,
+            payload.variables
+          );
+          break;
+        case 'audio':
+          result = await wabaApi.sendAudio(
+            chatId,
+            payload.base64,
+            payload.mimeType,
+            payload.durationSeconds
+          );
+          break;
+        case 'media':
+          result = await wabaApi.sendMedia(
+            chatId,
+            payload.mediaKind,
+            payload.base64,
+            payload.mimeType,
+            payload.caption,
+            payload.filename
+          );
+          break;
+      }
 
       if (!result.success) {
         await handleSendFailure(result, chatId, localId, payload);
@@ -553,10 +658,19 @@ export const WabaView: React.FC<WabaViewProps> = ({
 
       setMessages(prev => {
         // Corrida: o INSERT do realtime pode ter chegado antes desta resposta.
-        // Se a linha real já está na lista, a otimista simplesmente sai.
+        // Se a linha real já está na lista, a otimista simplesmente sai. Para
+        // mídia esta é a ÚNICA cobertura da corrida (sem fallback por texto).
         const realAlreadyArrived = prev.some(m => !m.localId && m.wamid === result.wamid);
-        if (realAlreadyArrived) return prev.filter(m => m.localId !== localId);
+        if (realAlreadyArrived) {
+          return prev.filter(m => {
+            if (m.localId !== localId) return true;
+            revokeLocalMedia(m);
+            return false;
+          });
+        }
 
+        // Com o `wamid` gravado, a otimista passa a casar com o realtime. O
+        // `localMediaUrl` fica (spread) até a linha real trazer a `media_url`.
         return prev.map(m =>
           m.localId === localId
             ? { ...m, wamid: result.wamid, status: 'sent', pendingState: undefined, retry: undefined }
@@ -570,16 +684,14 @@ export const WabaView: React.FC<WabaViewProps> = ({
 
   /** Coloca a mensagem na tela na hora e devolve o controle ao assessor. */
   const startSend = (chatId: string, payload: SendPayload) => {
-    const text =
-      payload.kind === 'text'
-        ? payload.text
-        : templateLogText(payload.template.name, payload.variables);
+    const text = payloadText(payload);
 
-    const guardKey = `${chatId}::${text}`;
-    if (inFlightRef.current.has(guardKey)) return;
+    if (inFlightRef.current.has(payloadGuardKey(chatId, payload))) return;
 
     const localId = newLocalId();
     const timestamp = new Date().toISOString();
+    // Extraídos com o discriminante à vista para o TS estreitar a união.
+    const mediaPayload = payload.kind === 'audio' || payload.kind === 'media' ? payload : null;
 
     const optimistic: LocalMessage = {
       id: localId,
@@ -588,8 +700,17 @@ export const WabaView: React.FC<WabaViewProps> = ({
       from_me: true,
       sent_by_user_id: user?.id ?? null,
       message_text: text,
-      message_type: payload.kind === 'template' ? 'template' : 'text',
+      message_type:
+        payload.kind === 'media'
+          ? payload.mediaKind
+          : payload.kind === 'audio'
+            ? 'audio'
+            : payload.kind === 'template'
+              ? 'template'
+              : 'text',
       media_url: null,
+      media_mime_type: mediaPayload?.mimeType ?? null,
+      media_duration_seconds: payload.kind === 'audio' ? payload.durationSeconds : null,
       status: null,
       timestamp,
       template_name: payload.kind === 'template' ? payload.template.name : null,
@@ -597,6 +718,8 @@ export const WabaView: React.FC<WabaViewProps> = ({
       pricing_category: null,
       localId,
       pendingState: 'sending',
+      // O renderizador usa este blob URL até a `media_url` do Storage chegar.
+      localMediaUrl: mediaPayload ? URL.createObjectURL(mediaPayload.blob) : undefined,
     };
 
     setFeedback(null);
@@ -627,99 +750,61 @@ export const WabaView: React.FC<WabaViewProps> = ({
   };
 
   /**
-   * Envio da nota de voz. Sem mensagem otimista: o proxy grava no banco e a
-   * linha chega pelo canal realtime existente. Devolve `false` em falha para o
-   * recorder preservar o preview e permitir nova tentativa.
+   * Envio da nota de voz, agora otimista: o balão aparece na hora com o player
+   * tocando o blob local, e o recorder fecha o preview imediatamente (por isso
+   * o `true` incondicional). Falha vira balão `failed` com reenviar, pelo mesmo
+   * caminho do texto.
    */
   const handleSendVoice = async (
     base64: string,
     mimeType: string,
-    durationSeconds: number
+    durationSeconds: number,
+    blob: Blob
   ): Promise<boolean> => {
     if (!selectedChat) return false;
-
-    setFeedback(null);
-    const result = await wabaApi.sendAudio(selectedChat.id, base64, mimeType, durationSeconds);
-    if (result.success) return true;
-
-    switch (result.error_code) {
-      case 'WINDOW_CLOSED':
-        // Recarregar o contato vira o composer para modo template; o recorder
-        // desmonta junto e libera o microfone.
-        await reloadSelectedChat(selectedChat.id);
-        setNow(Date.now());
-        setFeedback({
-          type: 'error',
-          text: 'A janela de 24h fechou e o áudio não foi enviado. Só é possível enviar um template aprovado.',
-        });
-        break;
-      case 'RATE_LIMITED':
-        setFeedback({ type: 'error', text: 'Limite de envio atingido. Tente novamente em instantes.' });
-        break;
-      default:
-        setFeedback({ type: 'error', text: result.message || 'Não foi possível enviar o áudio.' });
-    }
-    return false;
+    startSend(selectedChat.id, { kind: 'audio', base64, mimeType, durationSeconds, blob });
+    return true;
   };
 
   const handleVoiceActiveChange = useCallback((active: boolean) => setVoiceActive(active), []);
 
   /**
-   * Envio de imagem/documento a partir do preview. Sem mensagem otimista — o
-   * proxy grava e a linha chega pelo realtime, como no áudio.
-   *
-   * Devolve `null` em sucesso e a mensagem de erro em falha: o erro é exibido
-   * dentro do próprio preview, porque o banner do composer ficaria escondido
-   * atrás do overlay.
+   * Envio de imagem/documento a partir do preview, agora otimista: preparado o
+   * arquivo, o overlay fecha e o balão "enviando" assume. Falha de rede/proxy
+   * vira balão `failed` com reenviar — só a falha de PREPARO (conversão/
+   * leitura, quando nada foi inserido) ainda volta como string para o preview
+   * exibir.
    */
   const handleSendMedia = async (caption: string): Promise<string | null> => {
     if (!selectedChat || !pendingAttachment) return 'Não foi possível enviar o arquivo.';
     const { kind, file } = pendingAttachment;
 
-    let base64: string;
-    let mimeType: string;
+    let payload: SendPayload;
     try {
       if (kind === 'image') {
         // PNG passa no upload da Meta mas falha na entrega — vai sempre JPEG.
-        ({ base64, mimeType } = await imageFileToJpeg(file));
+        // O blob convertido também alimenta o balão otimista: o preview local
+        // mostra exatamente o que o cliente vai receber.
+        const { base64, mimeType, blob } = await imageFileToJpeg(file);
+        payload = { kind: 'media', mediaKind: 'image', base64, mimeType, caption: caption || undefined, blob };
       } else {
-        base64 = await fileToBase64(file);
-        mimeType = file.type || 'application/octet-stream';
+        payload = {
+          kind: 'media',
+          mediaKind: 'document',
+          base64: await fileToBase64(file),
+          mimeType: file.type || 'application/octet-stream',
+          caption: caption || undefined,
+          filename: file.name,
+          blob: file,
+        };
       }
     } catch {
       return 'Não foi possível preparar o arquivo para envio.';
     }
 
-    const result = await wabaApi.sendMedia(
-      selectedChat.id,
-      kind,
-      base64,
-      mimeType,
-      caption || undefined,
-      kind === 'document' ? file.name : undefined
-    );
-
-    if (result.success) {
-      setPendingAttachment(null);
-      return null;
-    }
-
-    switch (result.error_code) {
-      case 'WINDOW_CLOSED':
-        // O preview fecha junto: com a janela fechada só resta template.
-        setPendingAttachment(null);
-        await reloadSelectedChat(selectedChat.id);
-        setNow(Date.now());
-        setFeedback({
-          type: 'error',
-          text: 'A janela de 24h fechou e o arquivo não foi enviado. Só é possível enviar um template aprovado.',
-        });
-        return null;
-      case 'RATE_LIMITED':
-        return 'Limite de envio atingido. Tente novamente em instantes.';
-      default:
-        return result.message || 'Não foi possível enviar o arquivo.';
-    }
+    setPendingAttachment(null);
+    startSend(selectedChat.id, payload);
+    return null;
   };
 
   /** Cresce até ~5 linhas; depois disso o scroll é interno. */

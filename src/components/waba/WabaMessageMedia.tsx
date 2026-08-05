@@ -5,7 +5,8 @@ import { WabaAudioPlayer } from './WabaAudioPlayer';
 import { documentFileName, mediaCaption, MEDIA_TIMEOUT_MS } from './wabaUtils';
 
 type WabaMessageMediaProps = {
-  message: WabaMessage;
+  /** `localMediaUrl` é o blob URL da otimista, presente até a `media_url` real chegar. */
+  message: WabaMessage & { localMediaUrl?: string };
   /** Relógio do WabaView — decide quando a mídia deixou de estar "chegando". */
   now: number;
 };
@@ -28,7 +29,9 @@ const Caption: React.FC<{ text: string | null | undefined }> = ({ text }) => {
  * troca sozinho pela mídia.
  */
 export const WabaMessageMedia: React.FC<WabaMessageMediaProps> = ({ message, now }) => {
-  const { media_url: url, message_type: type, message_text: text } = message;
+  const { message_type: type, message_text: text } = message;
+  // A URL do Storage vence; o blob local segura o preview enquanto ela não vem.
+  const url = message.media_url || message.localMediaUrl || null;
 
   if (!url) {
     const elapsed = now - new Date(message.timestamp).getTime();

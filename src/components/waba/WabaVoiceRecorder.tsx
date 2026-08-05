@@ -10,8 +10,11 @@ const MIME = 'audio/ogg; codecs=opus';
 type Phase = 'idle' | 'starting' | 'recording' | 'preview' | 'sending';
 
 type WabaVoiceRecorderProps = {
-  /** Faz o envio (proxy + tratamento de erro) e devolve se deu certo. */
-  onSend: (base64: string, mimeType: string, durationSeconds: number) => Promise<boolean>;
+  /**
+   * Entrega o áudio para envio (o blob alimenta o balão otimista) e devolve se
+   * o fluxo seguiu — `true` fecha o preview do recorder na hora.
+   */
+  onSend: (base64: string, mimeType: string, durationSeconds: number, blob: Blob) => Promise<boolean>;
   /** Erros que o usuário precisa ver (permissão negada etc.). */
   onError: (text: string) => void;
   /** Avisa quando a gravação toma o lugar do campo de texto. */
@@ -227,7 +230,7 @@ export const WabaVoiceRecorder: React.FC<WabaVoiceRecorderProps> = ({
       return;
     }
 
-    const ok = await onSend(base64, MIME, durationRef.current);
+    const ok = await onSend(base64, MIME, durationRef.current, blob);
     if (ok) discardPreview();
     else setPhase('preview'); // preservado para tentar de novo
   };
