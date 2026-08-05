@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Search, MessageCircle, ChevronDown, X } from 'lucide-react';
+import { Search, MessageCircle, ChevronDown, X, ArrowLeft } from 'lucide-react';
 import { DatePicker } from './DatePicker';
 import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { MD_QUERY } from '../lib/viewRouting';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { evolutionApi } from '../lib/evolutionApi';
@@ -205,6 +207,8 @@ function applyVars(template: string, c: Cliente): string {
 }
 
 export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenWabaChat, onSelectCliente }: AtendimentosViewProps) {
+  // Abaixo de `md` lista e preview se alternam, como no WABA.
+  const isMobile = !useMediaQuery(MD_QUERY);
   const { profile } = useAuth();
 
   const [selectedAssessor, setSelectedAssessor] = useState('');
@@ -387,6 +391,28 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
     return null;
   }, [chatPhoneMap]);
 
+  /**
+   * No celular o preview ocupa a tela: empilha uma entrada de histórico para
+   * que o botão voltar do aparelho retorne à lista em vez de sair da tela.
+   */
+  useEffect(() => {
+    if (!isMobile || !previewCliente) return;
+
+    window.history.pushState({ ...window.history.state, atendimentoPreview: true }, '');
+    const onPopState = () => setPreviewCliente(null);
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [isMobile, previewCliente]);
+
+  /** Consome a entrada empilhada acima; no desktop apenas fecha. */
+  const handleClosePreview = useCallback(() => {
+    if (isMobile) window.history.back();
+    else setPreviewCliente(null);
+  }, [isMobile]);
+
+  const showList = !isMobile || !previewCliente;
+
   const handleOpenPreview = useCallback(async (c: Cliente) => {
     if (!c.telefone) return;
     const chatId = getChatId(c.telefone);
@@ -504,7 +530,7 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
     return (
       <div
         key={c.id}
-        className={`flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 hover:border-slate-300 transition-all ${rowBorder(cls)} ${hasChat ? 'cursor-pointer' : ''}`}
+        className={`flex flex-col md:flex-row md:items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 hover:border-slate-300 transition-all ${rowBorder(cls)} ${hasChat ? 'cursor-pointer' : ''}`}
         onClick={() => hasChat && handleOpenPreview(c)}
       >
         {/* Central area — no click handler, handled by parent */}
@@ -636,6 +662,9 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
+      {/* No mobile é uma coisa por vez: ou a lista, ou o preview. */}
+      {showList && (
+      <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">Atendimentos</h2>
@@ -657,7 +686,7 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
       </div>
 
       {/* Summary bar */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: 'Total atribuídos',       value: summary.total,       cls: 'text-slate-800' },
           { label: 'Atendimento iniciado',   value: summary.iniciado,    cls: 'text-green-700' },
@@ -672,7 +701,7 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+      <div className="flex flex-wrap gap-1 bg-slate-100 rounded-lg p-1">
         {([
           { key: 'todos',        label: `Todos (${summary.total})` },
           { key: 'iniciado',     label: `Iniciados (${summary.iniciado})` },
@@ -790,16 +819,40 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
           rows.map(renderRow)
         )}
       </div>
+      </>
+      )}
 
-      {/* Chat preview modal */}
+      {/* Chat preview — modal no desktop, tela cheia no mobile */}
       {previewCliente && (
         <div
-          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-          onMouseDown={e => { if (e.target === e.currentTarget) setPreviewCliente(null); }}
+          className={
+            isMobile
+              ? 'fixed inset-0 bg-white z-50 flex flex-col'
+              : 'fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4'
+          }
+          onMouseDown={e => { if (!isMobile && e.target === e.currentTarget) setPreviewCliente(null); }}
         >
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden max-h-[80vh]">
+          <div
+            className={
+              isMobile
+                ? 'bg-white w-full flex-1 min-h-0 flex flex-col'
+                : 'bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden max-h-[80vh]'
+            }
+          >
             {/* Header */}
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-100">
+            <div
+              className="flex items-center gap-3 px-4 py-3 border-b border-slate-100 flex-shrink-0"
+              style={isMobile ? { paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' } : undefined}
+            >
+              {isMobile && (
+                <button
+                  onClick={handleClosePreview}
+                  aria-label="Voltar para a lista"
+                  className="w-11 h-11 -ml-2 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 transition-colors flex-shrink-0"
+                >
+                  <ArrowLeft size={20} />
+                </button>
+              )}
               <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold ${avatarClass(previewCliente.status)}`}>
                 {getInitials(previewCliente.nome)}
               </div>
@@ -809,12 +862,14 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
                   <p className="text-xs text-slate-400">{previewCliente.telefone}</p>
                 )}
               </div>
-              <button
-                onClick={() => setPreviewCliente(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-              >
-                <X size={16} />
-              </button>
+              {!isMobile && (
+                <button
+                  onClick={handleClosePreview}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
 
             {/* Messages */}
@@ -854,8 +909,8 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
                 <WhatsAppChannelMenu
                   clienteId={previewCliente.id}
                   telefone={previewCliente.telefone}
-                  onOpenQr={phone => { setPreviewCliente(null); onOpenWhatsApp(phone); }}
-                  onOpenWaba={chatId => { setPreviewCliente(null); onOpenWabaChat(chatId); }}
+                  onOpenQr={phone => { handleClosePreview(); onOpenWhatsApp(phone); }}
+                  onOpenWaba={chatId => { handleClosePreview(); onOpenWabaChat(chatId); }}
                   className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
                 >
                   <MessageCircle size={15} />

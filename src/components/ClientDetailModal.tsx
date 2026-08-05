@@ -14,6 +14,8 @@ import { capitalizeName } from '../utils/formatters';
 import { DepositoHistoricoModal } from './DepositoHistoricoModal';
 import { WabaClientHistory } from './waba/WabaClientHistory';
 import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { MD_QUERY } from '../lib/viewRouting';
 
 type ClientDetailModalProps = {
   cliente: Cliente;
@@ -69,6 +71,8 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   onOpenWabaChat,
   autoOpenAgendamento,
 }) => {
+  // Abaixo de `md` o modal ocupa a tela inteira em vez de imitar card.
+  const isMobile = !useMediaQuery(MD_QUERY);
   const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState<Partial<Cliente>>(cliente);
   const [ligacoes, setLigacoes] = useState<Ligacao[]>([]);
@@ -386,16 +390,29 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto relative">
+      <div className={`fixed inset-0 bg-black bg-opacity-50 flex justify-center z-50 ${isMobile ? '' : 'items-center p-4'}`}>
+        <div
+          className={
+            isMobile
+              ? 'bg-white w-full h-[100dvh] flex flex-col relative'
+              : 'bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto relative p-6'
+          }
+        >
           {(loadingData || completingAgendamento) && (
             <LoadingOverlay message={completingAgendamento ? 'Finalizando agendamento...' : 'Carregando dados...'} />
           )}
-          <div className="p-6">
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex-1">
+          {/* Cabeçalho — no mobile fica fixo no topo, fora da área que rola. */}
+          <div
+            className={
+              isMobile
+                ? 'flex justify-between items-start gap-2 px-4 pb-3 border-b border-slate-200 flex-shrink-0'
+                : 'flex justify-between items-start mb-6'
+            }
+            style={isMobile ? { paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' } : undefined}
+          >
+              <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h2 className="text-2xl font-bold">{capitalizeName(cliente.nome)}</h2>
+                  <h2 className="text-xl md:text-2xl font-bold truncate">{capitalizeName(cliente.nome)}</h2>
                   <button
                     onClick={async () => {
                       setTogglingVisibility(true);
@@ -419,14 +436,24 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                   {getDisplayName(cliente.status)}
                 </span>
               </div>
-              <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
+              <button
+                onClick={onClose}
+                aria-label="Fechar"
+                className="text-gray-500 hover:text-gray-700 flex-shrink-0 flex items-center justify-center w-11 h-11 -mr-2 md:w-auto md:h-auto md:mr-0"
+              >
                 <X size={24} />
               </button>
             </div>
 
+          {/* Corpo — no mobile é ele que rola, não a janela inteira. */}
+          <div
+            className={isMobile ? 'flex-1 min-h-0 overflow-y-auto px-4 pt-4' : ''}
+            style={isMobile ? { paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' } : undefined}
+          >
+
             {editMode ? (
               <div className="space-y-4 mb-6">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium mb-1">Nome</label>
                     <input
@@ -523,7 +550,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
               </div>
             ) : (
               <div className="space-y-4 mb-6">
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm text-gray-600">Email</p>
                     <p className="font-semibold">{cliente.email || ''}</p>
@@ -661,7 +688,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     <button
                       key={col.status_key}
                       onClick={() => onStatusChange(cliente.id, col.status_key)}
-                      className={`px-3 py-1 rounded text-sm ${getStatusColor(col.status_key)} hover:opacity-80 transition-opacity`}
+                      className={`px-3 py-1 min-h-[44px] md:min-h-0 rounded text-sm ${getStatusColor(col.status_key)} hover:opacity-80 transition-opacity`}
                     >
                       {col.display_name}
                     </button>

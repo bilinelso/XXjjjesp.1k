@@ -3,6 +3,8 @@ import { MessageCircle, BadgeCheck, Loader2, AlertCircle } from 'lucide-react';
 import { wabaApi } from '../../lib/wabaApi';
 
 const MENU_WIDTH = 264;
+/** Altura aproximada do menu, usada só para decidir se abre para cima. */
+const MENU_HEIGHT_ESTIMATE = 140;
 
 type WhatsAppChannelMenuProps = {
   clienteId: string;
@@ -33,7 +35,7 @@ export const WhatsAppChannelMenu: React.FC<WhatsAppChannelMenuProps> = ({
   children,
 }) => {
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [position, setPosition] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -57,10 +59,17 @@ export const WhatsAppChannelMenu: React.FC<WhatsAppChannelMenuProps> = ({
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
 
-    setPosition({
-      top: rect.bottom + 4,
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8)),
-    });
+    // Abre para cima quando não há espaço abaixo — sem isto o menu de um
+    // gatilho perto do rodapé (último card da lista, botão do preview) nasce
+    // fora da tela.
+    const left = Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8));
+    const openUpward = rect.bottom + MENU_HEIGHT_ESTIMATE > window.innerHeight;
+
+    setPosition(
+      openUpward
+        ? { bottom: window.innerHeight - rect.top + 4, left }
+        : { top: rect.bottom + 4, left }
+    );
     setError(null);
     setOpen(true);
   };
@@ -133,7 +142,7 @@ export const WhatsAppChannelMenu: React.FC<WhatsAppChannelMenuProps> = ({
           <div
             role="menu"
             onClick={e => e.stopPropagation()}
-            style={{ top: position.top, left: position.left, width: MENU_WIDTH }}
+            style={{ top: position.top, bottom: position.bottom, left: position.left, width: MENU_WIDTH }}
             className="fixed z-[61] bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden text-left"
           >
             <button

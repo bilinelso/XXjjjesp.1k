@@ -36,6 +36,8 @@ import { PasswordManager } from './components/PasswordManager';
 import { LeadMatchingAudit } from './components/LeadMatchingAudit';
 import { ShadowClientView } from './components/ShadowClientView';
 import { WabaView } from './components/waba/WabaView';
+import { LeadCardList } from './components/LeadCardList';
+import { LeadSortMenu } from './components/LeadSortMenu';
 import { LG_QUERY, MD_QUERY, MOBILE_VIEWS, type ViewType } from './lib/viewRouting';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { useViewRoute } from './hooks/useViewRoute';
@@ -331,10 +333,16 @@ function AppContent() {
           aValue = (a.assessor || '').toLowerCase();
           bValue = (b.assessor || '').toLowerCase();
           break;
-        case 'valor_deposito':
-          aValue = a.valor_deposito || 0;
-          bValue = b.valor_deposito || 0;
+        case 'valor_deposito': {
+          // Vazios sempre no fim, nos dois sentidos: quase metade da base não
+          // tem depósito, e no ascendente eles enterrariam quem tem.
+          const aEmpty = (a.valor_deposito ?? 0) < 1;
+          const bEmpty = (b.valor_deposito ?? 0) < 1;
+          if (aEmpty !== bEmpty) return aEmpty ? 1 : -1;
+          aValue = a.valor_deposito ?? 0;
+          bValue = b.valor_deposito ?? 0;
           break;
+        }
         case 'performance':
           aValue = a.performance ?? -Infinity;
           bValue = b.performance ?? -Infinity;
@@ -1386,6 +1394,14 @@ function AppContent() {
   const filtrosAtivos =
     filtros.dataInicio || filtros.dataFim || filtros.assessor !== 'todas' || filtros.status !== 'todos' || filtros.categoriaInvestimento !== 'todas';
 
+  /** Quantos filtros estão ativos — vira o contador do botão no mobile. */
+  const filtrosAtivosCount = [
+    !!(filtros.dataInicio || filtros.dataFim),
+    filtros.assessor !== 'todas',
+    filtros.status !== 'todos',
+    filtros.categoriaInvestimento !== 'todas',
+  ].filter(Boolean).length;
+
   const dadosGrafico = [
     { nome: 'Compraram', valor: clientesFiltrados.length },
     {
@@ -1629,8 +1645,8 @@ function AppContent() {
 
         {/* Filter bar — leads / kanban / formularios */}
         {(view === 'leads' || view === 'kanban' || view === 'formularios') && (
-          <div className="bg-white border-b border-slate-200 px-6 py-3 flex-shrink-0">
-            <div className="flex items-center gap-4">
+          <div className="bg-white border-b border-slate-200 px-4 md:px-6 py-3 flex-shrink-0">
+            <div className="flex items-center gap-2 md:gap-4">
               <div className="flex-1 max-w-md">
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={20} />
@@ -1673,24 +1689,49 @@ function AppContent() {
                   )}
                 </div>
               </div>
+              {/* Ordenação: controle próprio no mobile, ao lado de Filtros.
+                  No desktop a ordenação continua sendo pelas colunas. */}
+              {view === 'leads' && !isMdUp && (
+                <LeadSortMenu sortConfig={sortConfig} onChange={setSortConfig} />
+              )}
               {view !== 'formularios' && (
               <button
                 onClick={() => setShowFilters(!showFilters)}
-                className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all ${
+                className={`px-4 py-2 min-h-[44px] md:min-h-0 rounded-lg flex items-center gap-2 transition-all flex-shrink-0 ${
                   showFilters || filtrosAtivos
                     ? 'bg-blue-600 text-white shadow-md'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 <Filter size={18} />
-                Filtros
-                {filtrosAtivos && <span className="bg-white text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">✓</span>}
+                {/* Em 380px o rótulo cede espaço; o critério de ordenação, não. */}
+                <span className="hidden md:inline">Filtros</span>
+                {filtrosAtivos && (
+                  <span className="bg-white text-blue-600 px-2 py-0.5 rounded-full text-xs font-semibold">
+                    {isMdUp ? '✓' : filtrosAtivosCount}
+                  </span>
+                )}
               </button>
               )}
             </div>
 
+            {/* No mobile os filtros viram folha inferior — a barra horizontal não cabe. */}
+            {showFilters && !isMdUp && (
+              <div
+                className="fixed inset-0 bg-black/40 z-40"
+                onClick={() => setShowFilters(false)}
+                aria-hidden="true"
+              />
+            )}
             {showFilters && (
-              <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
+              <div
+                className={
+                  isMdUp
+                    ? 'mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200'
+                    : 'fixed inset-x-0 bottom-0 z-50 p-4 bg-white border-t border-slate-200 rounded-t-2xl shadow-2xl max-h-[85dvh] overflow-y-auto'
+                }
+                style={isMdUp ? undefined : { paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+              >
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold text-slate-900">Filtros Avançados</h3>
                   {filtrosAtivos && (
@@ -1888,9 +1929,9 @@ function AppContent() {
       ) : (
         <>
           {view === 'leads' && canAccess('leads') && (
-        <div className="max-w-[1600px] mx-auto px-6 py-6">
+        <div className="max-w-[1600px] mx-auto px-0 md:px-6 py-4 md:py-6">
           {selectedClienteIds.size > 0 && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 flex items-center justify-between">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 mx-4 md:mx-0 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
               <div className="flex items-center gap-3">
                 <CheckSquare className="text-blue-600" size={20} />
                 <span className="font-semibold text-blue-800">
@@ -1914,7 +1955,21 @@ function AppContent() {
               </div>
             </div>
           )}
-          <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+          <div className="bg-white md:rounded-lg shadow-sm border-y md:border border-slate-200 overflow-hidden">
+            {!isMdUp ? (
+              <LeadCardList
+                clientes={clientesPaginados}
+                isMaster={!!profile?.is_master}
+                selectedIds={selectedClienteIds}
+                onToggleSelection={toggleClienteSelection}
+                onSelectCliente={c => { setSelectedCliente(c); setShowModal(true); }}
+                onOpenWhatsApp={handleOpenWhatsApp}
+                onOpenWabaChat={handleOpenWabaChat}
+                getStatusColor={getStatusColor}
+                getStatusLabel={getStatusLabel}
+                formatarData={formatarData}
+              />
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead className="bg-slate-50 border-b border-slate-200">
@@ -2132,6 +2187,7 @@ function AppContent() {
                 </tbody>
               </table>
             </div>
+            )}
             <Pagination
               currentPage={currentPageClientes}
               totalPages={totalPagesClientes}
