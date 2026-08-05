@@ -19,10 +19,12 @@ import {
   formatRemaining,
   formatTimeAgo,
   formatWabaPhone,
+  isMediaType,
   messageStatusLabel,
   resolveChatName,
   WINDOW_WARNING_MS,
 } from './wabaUtils';
+import { WabaMessageMedia } from './WabaMessageMedia';
 
 const CHAT_SELECT = '*, waba_contacts(*, clientes(id, nome))';
 
@@ -932,18 +934,24 @@ export const WabaView: React.FC<WabaViewProps> = ({
                 ) : (
                   messages.map(message => {
                     const statusLabel = messageStatusLabel(message.status);
+                    const isSticker = message.message_type === 'sticker';
                     return (
                       <div
                         key={message.id}
                         className={`flex ${message.from_me ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
-                          className={`max-w-[70%] rounded-lg px-3 py-2 transition-opacity ${
+                          className={`max-w-[80%] md:max-w-[70%] rounded-lg transition-opacity ${
+                            // Sticker não usa balão — fica solto sobre o fundo.
+                            isSticker ? 'px-0 py-0' : 'px-3 py-2'
+                          } ${
                             message.pendingState === 'failed'
                               ? 'bg-red-50 border border-red-300 text-slate-800'
-                              : message.from_me
-                                ? `bg-[#E6F1FB] text-slate-800 ${message.pendingState === 'sending' ? 'opacity-70' : ''}`
-                                : 'bg-white border border-slate-200 text-slate-800'
+                              : isSticker
+                                ? ''
+                                : message.from_me
+                                  ? `bg-[#E6F1FB] text-slate-800 ${message.pendingState === 'sending' ? 'opacity-70' : ''}`
+                                  : 'bg-white border border-slate-200 text-slate-800'
                           }`}
                         >
                           {message.template_name && (
@@ -951,9 +959,13 @@ export const WabaView: React.FC<WabaViewProps> = ({
                               Template · {message.template_name}
                             </p>
                           )}
-                          <p className="text-sm whitespace-pre-wrap break-words">
-                            {message.message_text}
-                          </p>
+                          {isMediaType(message.message_type) ? (
+                            <WabaMessageMedia message={message} now={now} />
+                          ) : (
+                            <p className="text-sm whitespace-pre-wrap break-words">
+                              {message.message_text}
+                            </p>
+                          )}
                           <div className="flex items-center gap-2 mt-1 flex-wrap">
                             <span className="text-[10px] text-slate-400">
                               {formatMessageTime(message.timestamp)}

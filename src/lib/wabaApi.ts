@@ -196,7 +196,11 @@ export interface WabaMessage {
   sent_by_user_id: string | null;
   message_text: string | null;
   message_type: string;
+  /** Null até o webhook terminar de baixar da Meta — ver `WabaMessageMedia`. */
   media_url: string | null;
+  media_mime_type?: string | null;
+  /** Não é populado hoje; a duração vem do próprio elemento de áudio. */
+  media_duration_seconds?: number | null;
   status: WabaMessageStatus | string | null;
   timestamp: string;
   template_name: string | null;

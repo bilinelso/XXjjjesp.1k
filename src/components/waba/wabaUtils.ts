@@ -109,6 +109,51 @@ export function formatMessageTime(timestamp: string | null | undefined): string 
   return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
+// ── Mídia ────────────────────────────────────────────────────────────────────
+
+export const MEDIA_TYPES = ['audio', 'image', 'video', 'document', 'sticker'] as const;
+export type MediaType = (typeof MEDIA_TYPES)[number];
+
+/**
+ * Depois disto, uma mensagem de mídia ainda sem `media_url` é considerada
+ * perdida. O webhook insere a linha primeiro e preenche a URL segundos depois;
+ * passado esse prazo o download falhou e não vem mais.
+ */
+export const MEDIA_TIMEOUT_MS = 60_000;
+
+export function isMediaType(messageType: string | null | undefined): messageType is MediaType {
+  return !!messageType && (MEDIA_TYPES as readonly string[]).includes(messageType);
+}
+
+/**
+ * `message_text` traz a caption quando existe e, quando não existe, um
+ * placeholder entre colchetes (`[Imagem]`, `[Documento: nota.pdf]`). Uma caption
+ * de verdade nunca é só um par de colchetes, então isso os separa sem precisar
+ * listar cada placeholder.
+ */
+export function isPlaceholderText(text: string | null | undefined): boolean {
+  if (!text) return true;
+  return /^\[[^\]]*\]$/.test(text.trim());
+}
+
+/** Caption real da mídia, ou null quando `message_text` é só placeholder. */
+export function mediaCaption(text: string | null | undefined): string | null {
+  return isPlaceholderText(text) ? null : (text as string);
+}
+
+/** `[Documento: contrato.pdf]` → `contrato.pdf` */
+export function documentFileName(text: string | null | undefined): string {
+  const match = (text || '').trim().match(/^\[Documento:\s*(.+)\]$/i);
+  return match ? match[1].trim() : 'Documento';
+}
+
+export function formatMediaDuration(seconds: number): string {
+  if (!seconds || Number.isNaN(seconds) || !Number.isFinite(seconds)) return '0:00';
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 // ── Templates ────────────────────────────────────────────────────────────────
 
 export interface TemplateComponent {
