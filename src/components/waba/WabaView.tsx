@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BadgeCheck, Search, AlertTriangle, Clock, User, Send, ExternalLink, MessageSquare, ArrowLeft, MoreVertical, Copy, RotateCw, RefreshCw } from 'lucide-react';
+import { BadgeCheck, Search, AlertTriangle, Clock, User, Send, ExternalLink, MessageSquare, ArrowLeft, MoreVertical, Copy, RotateCw, RefreshCw, MessageCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -404,6 +404,21 @@ export const WabaView: React.FC<WabaViewProps> = ({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [menuOpen]);
+
+  /**
+   * Abre o app do WhatsApp no número do contato.
+   *
+   * Só dígitos com código do país (`5566...`). `whatsapp://` em vez de `wa.me`
+   * porque no iOS o wa.me abre a página intermediária no Safari antes de saltar
+   * para o app. Se o WhatsApp não estiver instalado o esquema falha em
+   * silêncio — não há como detectar, então não se trata.
+   */
+  const handleOpenInWhatsApp = () => {
+    const digits = (selectedChat?.waba_contacts?.contact_phone || '').replace(/\D/g, '');
+    if (!digits) return;
+    setMenuOpen(false);
+    window.location.href = `whatsapp://send?phone=${digits}`;
+  };
 
   const handleCopyPhone = async (phone: string) => {
     setMenuOpen(false);
@@ -835,16 +850,30 @@ export const WabaView: React.FC<WabaViewProps> = ({
                             <ExternalLink size={13} className="text-slate-400 flex-shrink-0" />
                           </button>
                         )}
-                        <button
-                          onClick={() => handleCopyPhone(formatWabaPhone(selectedChat.waba_contacts?.contact_phone))}
-                          className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-sm text-slate-700 hover:bg-slate-50 transition-colors text-left border-t border-slate-100 first:border-t-0"
-                        >
-                          <Copy size={16} className="text-slate-400 flex-shrink-0" />
-                          <span className="flex-1 truncate">
-                            {formatWabaPhone(selectedChat.waba_contacts?.contact_phone)}
-                          </span>
-                          <span className="text-[11px] text-slate-400 flex-shrink-0">Copiar</span>
-                        </button>
+                        {/* Uma linha, dois alvos: o número abre o WhatsApp, o
+                            ícone à direita copia. Separados por borda para o
+                            dedo não errar. */}
+                        <div className="flex items-stretch border-t border-slate-100 first:border-t-0">
+                          <button
+                            onClick={handleOpenInWhatsApp}
+                            title="Abrir no WhatsApp"
+                            className="flex-1 min-w-0 min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-sm text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition-colors text-left"
+                          >
+                            <MessageCircle size={16} className="text-green-600 flex-shrink-0" />
+                            <span className="flex-1 truncate">
+                              {formatWabaPhone(selectedChat.waba_contacts?.contact_phone)}
+                            </span>
+                          </button>
+
+                          <button
+                            onClick={() => handleCopyPhone(formatWabaPhone(selectedChat.waba_contacts?.contact_phone))}
+                            aria-label="Copiar telefone"
+                            title="Copiar telefone"
+                            className="w-12 min-h-[44px] flex-shrink-0 flex items-center justify-center border-l border-slate-200 text-slate-500 hover:bg-slate-50 active:bg-slate-100 transition-colors"
+                          >
+                            <Copy size={16} />
+                          </button>
+                        </div>
                       </div>
                     </>
                   )}
