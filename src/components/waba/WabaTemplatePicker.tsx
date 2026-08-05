@@ -48,7 +48,8 @@ export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ template
         <select
           value={selectedId}
           onChange={e => handleSelect(e.target.value)}
-          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white"
+          // text-base no mobile: abaixo de 16px o iOS dá zoom ao focar.
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 min-h-[44px] text-base md:text-sm bg-white"
         >
           <option value="">Selecione um template...</option>
           {templates.map(t => (
@@ -61,7 +62,7 @@ export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ template
 
       {selected && shape && (
         <>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${templateCategoryStyle(selected.category)}`}>
               {selected.category}
             </span>
@@ -73,7 +74,7 @@ export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ template
           </div>
 
           {shape.variableIndexes.length > 0 && (
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {shape.variableIndexes.map(index => (
                 <div key={index}>
                   <label className="block text-[11px] text-slate-500 mb-1">{`Variável {{${index}}}`}</label>
@@ -81,7 +82,7 @@ export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ template
                     type="text"
                     value={values[index] || ''}
                     onChange={e => setValues(prev => ({ ...prev, [index]: e.target.value }))}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm"
+                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 min-h-[44px] text-base md:text-sm"
                     placeholder={`Valor para {{${index}}}`}
                   />
                 </div>
@@ -101,7 +102,7 @@ export const WabaTemplatePicker: React.FC<WabaTemplatePickerProps> = ({ template
           <button
             onClick={handleSend}
             disabled={sending || missingVariable}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-[#0C447C] text-white rounded-lg text-sm font-medium hover:bg-[#0a3a68] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 min-h-[44px] bg-[#0C447C] text-white rounded-lg text-sm font-medium hover:bg-[#0a3a68] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <Send size={15} />
             {sending ? 'Enviando...' : 'Enviar template'}

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock, Menu, Monitor, Smartphone } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
@@ -36,8 +36,12 @@ import { PasswordManager } from './components/PasswordManager';
 import { LeadMatchingAudit } from './components/LeadMatchingAudit';
 import { ShadowClientView } from './components/ShadowClientView';
 import { WabaView } from './components/waba/WabaView';
+import { LG_QUERY, MD_QUERY, MOBILE_VIEWS, type ViewType } from './lib/viewRouting';
+import { useMediaQuery } from './hooks/useMediaQuery';
+import { useViewRoute } from './hooks/useViewRoute';
 
-type ViewType = 'leads' | 'dashboard' | 'kanban' | 'agendamentos' | 'atendimentos' | 'campanhas' | 'financeiro' | 'configuracoes' | 'formularios' | 'whatsapp' | 'waba' | 'senhas' | 'lead-audit' | 'cliente-oculto';
+/** "Ver versão completa" vale pela sessão — sobrevive ao F5, não ao fechar a aba. */
+const FULL_VERSION_KEY = 'crm_mobile_full_version';
 
 function NavItem({ icon, label, active, collapsed, onClick, badge }: {
   icon: React.ReactNode; label: string; active: boolean; collapsed: boolean; onClick: () => void; badge?: string;
@@ -82,7 +86,93 @@ function NavGroup({ label, collapsed, children }: { label: string; collapsed: bo
 
 function AppContent() {
   const { profile, signOut, canAccess } = useAuth();
-  const [view, setView] = useState<ViewType>('leads');
+
+  const isDesktop = useMediaQuery(LG_QUERY);
+  const isMdUp = useMediaQuery(MD_QUERY);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [fullVersion, setFullVersion] = useState(() => {
+    try {
+      return sessionStorage.getItem(FULL_VERSION_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  /** Abaixo de `lg`, só as telas responsivas — até o usuário pedir a versão completa. */
+  const mobileRestricted = !isDesktop && !fullVersion;
+
+  /**
+   * Permissão real de cada tela. Espelha exatamente as condições da sidebar —
+   * `canAccess` não cobre as telas sem flag própria (atendimentos, waba,
+   * senhas, auditoria, cliente oculto), que têm regra própria abaixo.
+   */
+  const canView = useCallback((target: ViewType): boolean => {
+    if (!profile) return false;
+    switch (target) {
+      case 'atendimentos':
+      case 'waba':
+        return true;
+      case 'cliente-oculto':
+      case 'lead-audit':
+        return !!profile.is_master;
+      case 'campanhas':
+        return !!(profile.is_master || profile.can_access_campanhas);
+      case 'financeiro':
+        return !!(profile.is_master || profile.can_access_financeiro);
+      case 'senhas':
+        return !!(profile.is_master || profile.can_access_passwords);
+      default:
+        return canAccess(target);
+    }
+  }, [profile, canAccess]);
+
+  const { view, setView } = useViewRoute({
+    ready: !!profile,
+    isMobile: !isDesktop,
+    restrictToMobileViews: mobileRestricted,
+    canView,
+  });
+
+  /**
+   * No celular o WABA ocupa a tela inteira e o composer fica colado no rodapé:
+   * o botão flutuante do chat interno sentava em cima do botão de enviar. Não
+   * existe posição segura para ele ali, então não é montado nessa combinação.
+   */
+  const hideInternalChat = view === 'waba' && !isMdUp;
+
+  /** Navegação a partir da gaveta: troca a tela e fecha o overlay. */
+  const navigate = useCallback((target: ViewType) => {
+    setView(target);
+    setDrawerOpen(false);
+  }, [setView]);
+
+  /** Item visível no menu: precisa de permissão e, no mobile, ser responsivo. */
+  const navVisible = (target: ViewType) =>
+    canView(target) && (!mobileRestricted || MOBILE_VIEWS.includes(target));
+
+  const enableFullVersion = () => {
+    try { sessionStorage.setItem(FULL_VERSION_KEY, '1'); } catch { /* sessão indisponível */ }
+    setFullVersion(true);
+  };
+
+  const disableFullVersion = () => {
+    try { sessionStorage.removeItem(FULL_VERSION_KEY); } catch { /* sessão indisponível */ }
+    setFullVersion(false);
+  };
+
+  // A gaveta só existe abaixo de `lg`; ao voltar para o desktop ela some.
+  useEffect(() => {
+    if (isDesktop) setDrawerOpen(false);
+  }, [isDesktop]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [drawerOpen]);
+
   const [selectedCliente, setSelectedCliente] = useState<Cliente | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [autoOpenAgendamento, setAutoOpenAgendamento] = useState(false);
@@ -136,6 +226,8 @@ function AppContent() {
   // Contagem do módulo WABA (WhatsApp oficial) — independente do badge do módulo QR.
   const [wabaUnread, setWabaUnread] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Na gaveta do mobile o modo colapsado não faz sentido — ela é sempre completa.
+  const navCollapsed = isDesktop && sidebarCollapsed;
 
   useEffect(() => {
     if (view === 'whatsapp') setWhatsappUnread(0);
@@ -1307,136 +1399,222 @@ function AppContent() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }} className="bg-slate-50">
-      {/* ─── Sidebar ─── */}
+    <div className="bg-slate-50 flex h-[100dvh] overflow-hidden">
+      {/* Fundo escurecido da gaveta (apenas < lg) */}
+      {!isDesktop && drawerOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-40"
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* ─── Sidebar (>= lg) / Gaveta (< lg) ─── */}
       <aside
-        style={{
-          width: sidebarCollapsed ? 52 : 220,
-          minWidth: sidebarCollapsed ? 52 : 220,
-          transition: 'width 0.2s ease, min-width 0.2s ease',
-        }}
-        className="bg-white border-r border-slate-200 flex flex-col z-40 flex-shrink-0"
+        style={
+          isDesktop
+            ? {
+                width: sidebarCollapsed ? 52 : 220,
+                minWidth: sidebarCollapsed ? 52 : 220,
+                transition: 'width 0.2s ease, min-width 0.2s ease',
+              }
+            : undefined
+        }
+        className={
+          isDesktop
+            ? 'bg-white border-r border-slate-200 flex flex-col z-40 flex-shrink-0'
+            : `bg-white border-r border-slate-200 flex flex-col fixed inset-y-0 left-0 w-[260px] max-w-[85vw] z-50 transition-transform duration-200 ${
+                drawerOpen ? 'translate-x-0' : '-translate-x-full'
+              }`
+        }
       >
         <div className="h-[52px] flex items-center justify-between border-b border-slate-200 px-3 overflow-hidden flex-shrink-0">
-          {!sidebarCollapsed && (
+          {(!isDesktop || !sidebarCollapsed) && (
             <img
               src="http://stratefinance.com.br/wp-content/uploads/2025/09/cropped-10131057334828919434-1.png"
               alt="Strate Finance"
               className="h-7 w-auto object-contain"
             />
           )}
-          <button
-            onClick={() => setSidebarCollapsed(c => !c)}
-            className={`p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors flex-shrink-0 ${sidebarCollapsed ? 'mx-auto' : ''}`}
-          >
-            {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-          </button>
+          {isDesktop ? (
+            <button
+              onClick={() => setSidebarCollapsed(c => !c)}
+              className={`p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors flex-shrink-0 ${sidebarCollapsed ? 'mx-auto' : ''}`}
+            >
+              {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            </button>
+          ) : (
+            <button
+              onClick={() => setDrawerOpen(false)}
+              aria-label="Fechar menu"
+              className="p-2 -mr-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors flex-shrink-0"
+            >
+              <X size={18} />
+            </button>
+          )}
         </div>
         <nav className="flex-1 overflow-y-auto overflow-x-hidden py-2">
-          {canAccess('dashboard') && (
-            <NavItem icon={<TrendingUp size={18} />} label="Dashboard" active={view === 'dashboard'} collapsed={sidebarCollapsed} onClick={() => setView('dashboard')} />
+          {navVisible('dashboard') && (
+            <NavItem icon={<TrendingUp size={18} />} label="Dashboard" active={view === 'dashboard'} collapsed={navCollapsed} onClick={() => navigate('dashboard')} />
           )}
-          {(canAccess('leads') || canAccess('kanban') || canAccess('formularios')) && (
-            <NavGroup label="Clientes" collapsed={sidebarCollapsed}>
-              {canAccess('leads') && (
-                <NavItem icon={<List size={18} />} label="Lista" active={view === 'leads'} collapsed={sidebarCollapsed} onClick={() => setView('leads')} />
+          {(navVisible('leads') || navVisible('kanban') || navVisible('formularios')) && (
+            <NavGroup label="Clientes" collapsed={navCollapsed}>
+              {navVisible('leads') && (
+                <NavItem icon={<List size={18} />} label="Lista" active={view === 'leads'} collapsed={navCollapsed} onClick={() => navigate('leads')} />
               )}
-              {canAccess('kanban') && (
-                <NavItem icon={<LayoutGrid size={18} />} label="Kanban" active={view === 'kanban'} collapsed={sidebarCollapsed} onClick={() => setView('kanban')} />
+              {navVisible('kanban') && (
+                <NavItem icon={<LayoutGrid size={18} />} label="Kanban" active={view === 'kanban'} collapsed={navCollapsed} onClick={() => navigate('kanban')} />
               )}
-              {canAccess('formularios') && (
-                <NavItem icon={<ClipboardList size={18} />} label="Formulários" active={view === 'formularios'} collapsed={sidebarCollapsed} onClick={() => setView('formularios')} />
+              {navVisible('formularios') && (
+                <NavItem icon={<ClipboardList size={18} />} label="Formulários" active={view === 'formularios'} collapsed={navCollapsed} onClick={() => navigate('formularios')} />
               )}
             </NavGroup>
           )}
-          <NavGroup label="Operacional" collapsed={sidebarCollapsed}>
-            {canAccess('agendamentos') && (
-              <NavItem icon={<Calendar size={18} />} label="Agendamentos" active={view === 'agendamentos'} collapsed={sidebarCollapsed} onClick={() => setView('agendamentos')} />
-            )}
-            <NavItem icon={<Users size={18} />} label="Atendimentos" active={view === 'atendimentos'} collapsed={sidebarCollapsed} onClick={() => setView('atendimentos')} />
-            {profile?.is_master && (
-              <NavItem icon={<Eye size={18} />} label="Cliente Oculto" active={view === 'cliente-oculto'} collapsed={sidebarCollapsed} onClick={() => setView('cliente-oculto')} />
-            )}
-          </NavGroup>
-          {/* O item WABA é visível para todos os usuários autenticados, então o grupo sempre aparece. */}
-          <NavGroup label="Marketing" collapsed={sidebarCollapsed}>
-            {(profile?.is_master || profile?.can_access_campanhas) && (
-              <NavItem icon={<TrendingUp size={18} />} label="Campanhas" active={view === 'campanhas'} collapsed={sidebarCollapsed} onClick={() => setView('campanhas')} />
-            )}
-            {canAccess('whatsapp') && (
-              <NavItem
-                icon={<MessageCircle size={18} />}
-                label="WhatsApp"
-                active={view === 'whatsapp'}
-                collapsed={sidebarCollapsed}
-                onClick={() => setView('whatsapp')}
-                badge={whatsappUnread > 0 && view !== 'whatsapp' ? (whatsappUnread > 99 ? '99+' : String(whatsappUnread)) : undefined}
-              />
-            )}
-            <NavItem
-              icon={<BadgeCheck size={18} />}
-              label="WABA"
-              active={view === 'waba'}
-              collapsed={sidebarCollapsed}
-              onClick={() => setView('waba')}
-              badge={wabaUnread > 0 && view !== 'waba' ? (wabaUnread > 99 ? '99+' : String(wabaUnread)) : undefined}
-            />
-          </NavGroup>
-          {(profile?.is_master || profile?.can_access_financeiro) && (
-            <NavGroup label="Financeiro" collapsed={sidebarCollapsed}>
-              <NavItem icon={<DollarSign size={18} />} label="Financeiro" active={view === 'financeiro'} collapsed={sidebarCollapsed} onClick={() => setView('financeiro')} />
+          {(navVisible('agendamentos') || navVisible('atendimentos') || navVisible('cliente-oculto')) && (
+            <NavGroup label="Operacional" collapsed={navCollapsed}>
+              {navVisible('agendamentos') && (
+                <NavItem icon={<Calendar size={18} />} label="Agendamentos" active={view === 'agendamentos'} collapsed={navCollapsed} onClick={() => navigate('agendamentos')} />
+              )}
+              {navVisible('atendimentos') && (
+                <NavItem icon={<Users size={18} />} label="Atendimentos" active={view === 'atendimentos'} collapsed={navCollapsed} onClick={() => navigate('atendimentos')} />
+              )}
+              {navVisible('cliente-oculto') && (
+                <NavItem icon={<Eye size={18} />} label="Cliente Oculto" active={view === 'cliente-oculto'} collapsed={navCollapsed} onClick={() => navigate('cliente-oculto')} />
+              )}
             </NavGroup>
           )}
-          <NavGroup label="Sistema" collapsed={sidebarCollapsed}>
-            {canAccess('configuracoes') && (
-              <NavItem icon={<Settings size={18} />} label="Config" active={view === 'configuracoes'} collapsed={sidebarCollapsed} onClick={() => setView('configuracoes')} />
-            )}
-            {(profile?.is_master || profile?.can_access_passwords) && (
-              <NavItem icon={<Lock size={18} />} label="Senhas" active={view === 'senhas'} collapsed={sidebarCollapsed} onClick={() => setView('senhas')} />
-            )}
-            {profile?.is_master && (
-              <NavItem icon={<Search size={18} />} label="Auditoria Leads" active={view === 'lead-audit'} collapsed={sidebarCollapsed} onClick={() => setView('lead-audit')} />
-            )}
-          </NavGroup>
+          {(navVisible('campanhas') || navVisible('whatsapp') || navVisible('waba')) && (
+            <NavGroup label="Marketing" collapsed={navCollapsed}>
+              {navVisible('campanhas') && (
+                <NavItem icon={<TrendingUp size={18} />} label="Campanhas" active={view === 'campanhas'} collapsed={navCollapsed} onClick={() => navigate('campanhas')} />
+              )}
+              {navVisible('whatsapp') && (
+                <NavItem
+                  icon={<MessageCircle size={18} />}
+                  label="WhatsApp"
+                  active={view === 'whatsapp'}
+                  collapsed={navCollapsed}
+                  onClick={() => navigate('whatsapp')}
+                  badge={whatsappUnread > 0 && view !== 'whatsapp' ? (whatsappUnread > 99 ? '99+' : String(whatsappUnread)) : undefined}
+                />
+              )}
+              {navVisible('waba') && (
+                <NavItem
+                  icon={<BadgeCheck size={18} />}
+                  label="WABA"
+                  active={view === 'waba'}
+                  collapsed={navCollapsed}
+                  onClick={() => navigate('waba')}
+                  badge={wabaUnread > 0 && view !== 'waba' ? (wabaUnread > 99 ? '99+' : String(wabaUnread)) : undefined}
+                />
+              )}
+            </NavGroup>
+          )}
+          {navVisible('financeiro') && (
+            <NavGroup label="Financeiro" collapsed={navCollapsed}>
+              <NavItem icon={<DollarSign size={18} />} label="Financeiro" active={view === 'financeiro'} collapsed={navCollapsed} onClick={() => navigate('financeiro')} />
+            </NavGroup>
+          )}
+          {(navVisible('configuracoes') || navVisible('senhas') || navVisible('lead-audit')) && (
+            <NavGroup label="Sistema" collapsed={navCollapsed}>
+              {navVisible('configuracoes') && (
+                <NavItem icon={<Settings size={18} />} label="Config" active={view === 'configuracoes'} collapsed={navCollapsed} onClick={() => navigate('configuracoes')} />
+              )}
+              {navVisible('senhas') && (
+                <NavItem icon={<Lock size={18} />} label="Senhas" active={view === 'senhas'} collapsed={navCollapsed} onClick={() => navigate('senhas')} />
+              )}
+              {navVisible('lead-audit') && (
+                <NavItem icon={<Search size={18} />} label="Auditoria Leads" active={view === 'lead-audit'} collapsed={navCollapsed} onClick={() => navigate('lead-audit')} />
+              )}
+            </NavGroup>
+          )}
         </nav>
-      </aside>
 
-      {/* ─── Main ─── */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Compact 52px header */}
-        <div className="h-[52px] bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
-          <p className="text-sm text-slate-700">
-            <span className="font-semibold">{profile?.email}</span>
-            {profile?.is_master && (
-              <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded">Master</span>
+        {/* Rodapé da gaveta — saída para quem precisa de algo que ainda não é responsivo */}
+        {!isDesktop && (
+          <div className="border-t border-slate-200 p-3 flex-shrink-0">
+            {mobileRestricted ? (
+              <button
+                onClick={enableFullVersion}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <Monitor size={16} />
+                Ver versão completa
+              </button>
+            ) : (
+              <button
+                onClick={disableFullVersion}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <Smartphone size={16} />
+                Voltar ao modo celular
+              </button>
             )}
-          </p>
-          <div className="flex items-center gap-2">
-            <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} />
-            <button
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 text-sm transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed"
-            >
-              <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
-              {isRefreshing ? 'Atualizando...' : 'Atualizar'}
-            </button>
-            <button
-              onClick={exportarDados}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 text-sm transition-colors"
-            >
-              <Download size={15} />
-              Exportar
-            </button>
             <button
               onClick={signOut}
-              className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 text-sm transition-colors"
+              className="mt-1 w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
             >
-              <LogOut size={15} />
+              <LogOut size={16} />
               Sair
             </button>
           </div>
-        </div>
+        )}
+      </aside>
+
+      {/* ─── Main ─── */}
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {/* Compact 52px header */}
+        {isDesktop ? (
+          <div className="h-[52px] bg-white border-b border-slate-200 flex items-center justify-between px-6 flex-shrink-0">
+            <p className="text-sm text-slate-700">
+              <span className="font-semibold">{profile?.email}</span>
+              {profile?.is_master && (
+                <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-700 text-xs font-semibold rounded">Master</span>
+              )}
+            </p>
+            <div className="flex items-center gap-2">
+              <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} />
+              <button
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 text-sm transition-colors disabled:bg-blue-400 disabled:cursor-not-allowed"
+              >
+                <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
+                {isRefreshing ? 'Atualizando...' : 'Atualizar'}
+              </button>
+              <button
+                onClick={exportarDados}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-1.5 text-sm transition-colors"
+              >
+                <Download size={15} />
+                Exportar
+              </button>
+              <button
+                onClick={signOut}
+                className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 text-sm transition-colors"
+              >
+                <LogOut size={15} />
+                Sair
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="h-[52px] bg-white border-b border-slate-200 flex items-center justify-between px-2 flex-shrink-0">
+            <button
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Abrir menu"
+              className="p-2.5 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
+            >
+              <Menu size={22} />
+            </button>
+            <img
+              src="http://stratefinance.com.br/wp-content/uploads/2025/09/cropped-10131057334828919434-1.png"
+              alt="Strate Finance"
+              className="h-7 w-auto object-contain"
+            />
+            <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} />
+          </div>
+        )}
 
         {/* Filter bar — leads / kanban / formularios */}
         {(view === 'leads' || view === 'kanban' || view === 'formularios') && (
@@ -2887,7 +3065,7 @@ function AppContent() {
       )}
 
       {/* Módulo WABA (WhatsApp oficial) — sempre montado para manter a contagem de não lidas. */}
-      <div style={{ display: view === 'waba' ? 'block' : 'none' }} className="max-w-[1600px] mx-auto px-4">
+      <div style={{ display: view === 'waba' ? 'block' : 'none' }} className="max-w-[1600px] mx-auto px-0 lg:px-4">
         <WabaView
           onUnreadCountChange={setWabaUnread}
           onOpenCliente={handleOpenClienteFromWaba}
@@ -3248,7 +3426,7 @@ function AppContent() {
         />
       )}
 
-      <InternalChat onOpenWhatsApp={handleOpenWhatsApp} />
+      {!hideInternalChat && <InternalChat onOpenWhatsApp={handleOpenWhatsApp} />}
 
       {showAddLeadModal && (
         <AddLeadManualModal
