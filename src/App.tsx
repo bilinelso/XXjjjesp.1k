@@ -38,6 +38,7 @@ import { ShadowClientView } from './components/ShadowClientView';
 import { WabaView } from './components/waba/WabaView';
 import { LeadCardList } from './components/LeadCardList';
 import { LeadSortMenu } from './components/LeadSortMenu';
+import { WabaSelectionBroadcast } from './components/waba/WabaSelectionBroadcast';
 import { LG_QUERY, MD_QUERY, MOBILE_VIEWS, type ViewType } from './lib/viewRouting';
 import { useMediaQuery } from './hooks/useMediaQuery';
 import { useViewRoute } from './hooks/useViewRoute';
@@ -134,13 +135,6 @@ function AppContent() {
     canView,
   });
 
-  /**
-   * No celular o WABA ocupa a tela inteira e o composer fica colado no rodapé:
-   * o botão flutuante do chat interno sentava em cima do botão de enviar. Não
-   * existe posição segura para ele ali, então não é montado nessa combinação.
-   */
-  const hideInternalChat = view === 'waba' && !isMdUp;
-
   /** Navegação a partir da gaveta: troca a tela e fecha o overlay. */
   const navigate = useCallback((target: ViewType) => {
     setView(target);
@@ -223,6 +217,16 @@ function AppContent() {
   const itemsPerPage = 100;
   const [selectedClienteIds, setSelectedClienteIds] = useState<Set<string>>(new Set());
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
+  const [showSelectionBroadcast, setShowSelectionBroadcast] = useState(false);
+
+  /**
+   * No celular não existe posição segura para o botão flutuante do chat
+   * interno em duas situações: no WABA (o composer fica colado no rodapé) e na
+   * Lista com seleção ativa (a barra de seleção fixa ocupa o mesmo canto).
+   */
+  const hideInternalChat =
+    (view === 'waba' && !isMdUp) ||
+    (view === 'leads' && !isMdUp && selectedClienteIds.size > 0);
   const [whatsappTargetPhone, setWhatsappTargetPhone] = useState<string | null>(null);
   const [whatsappUnread, setWhatsappUnread] = useState(0);
   // Contagem do módulo WABA (WhatsApp oficial) — independente do badge do módulo QR.
@@ -1930,7 +1934,8 @@ function AppContent() {
         <>
           {view === 'leads' && canAccess('leads') && (
         <div className="max-w-[1600px] mx-auto px-0 md:px-6 py-4 md:py-6">
-          {selectedClienteIds.size > 0 && (
+          {/* Barra de seleção — bloco no desktop, rodapé fixo no mobile */}
+          {isMdUp && selectedClienteIds.size > 0 && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4 mx-4 md:mx-0 flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
               <div className="flex items-center gap-3">
                 <CheckSquare className="text-blue-600" size={20} />
@@ -1939,6 +1944,13 @@ function AppContent() {
                 </span>
               </div>
               <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSelectionBroadcast(true)}
+                  className="bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-2"
+                >
+                  <BadgeCheck size={16} />
+                  Enviar Template
+                </button>
                 <button
                   onClick={() => setShowBulkEditModal(true)}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
@@ -1951,6 +1963,43 @@ function AppContent() {
                   className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors"
                 >
                   Limpar Seleção
+                </button>
+              </div>
+            </div>
+          )}
+          {/* Mobile: uma linha fixa no rodapé, sem empurrar a lista. Fica
+              montada para a saída animar quando a seleção zera. */}
+          {!isMdUp && (
+            <div
+              className={`fixed inset-x-0 bottom-0 z-40 transition-transform duration-200 ${
+                selectedClienteIds.size > 0 ? 'translate-y-0' : 'translate-y-full'
+              }`}
+              style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+            >
+              <div className="bg-white border-t border-slate-200 shadow-[0_-2px_10px_rgba(0,0,0,0.08)] flex items-center gap-1 px-3 py-1">
+                <span className="flex-1 min-w-0 text-sm font-semibold text-blue-800 truncate">
+                  {selectedClienteIds.size} selecionado{selectedClienteIds.size === 1 ? '' : 's'}
+                </span>
+                <button
+                  onClick={() => setShowSelectionBroadcast(true)}
+                  className="flex items-center gap-1 px-2.5 min-h-[44px] rounded-lg text-xs font-medium text-emerald-700 hover:bg-emerald-50 transition-colors"
+                >
+                  <BadgeCheck size={16} />
+                  Template
+                </button>
+                <button
+                  onClick={() => setShowBulkEditModal(true)}
+                  className="flex items-center gap-1 px-2.5 min-h-[44px] rounded-lg text-xs font-medium text-blue-700 hover:bg-blue-50 transition-colors"
+                >
+                  <Edit2 size={16} />
+                  Editar
+                </button>
+                <button
+                  onClick={() => setSelectedClienteIds(new Set())}
+                  aria-label="Limpar seleção"
+                  className="flex items-center justify-center w-11 min-h-[44px] rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
+                >
+                  <X size={18} />
                 </button>
               </div>
             </div>
@@ -3474,6 +3523,16 @@ function AppContent() {
           onUpdateAgendamento={handleUpdateAgendamento}
           onOpenWhatsApp={handleOpenWhatsApp}
           onOpenWabaChat={handleOpenWabaChat}
+        />
+      )}
+
+      {/* Sem o guard de size>0: o sucesso limpa a seleção e a folha ainda
+          precisa mostrar o passo final. */}
+      {showSelectionBroadcast && (
+        <WabaSelectionBroadcast
+          clienteIds={[...selectedClienteIds]}
+          onClose={() => setShowSelectionBroadcast(false)}
+          onSent={() => setSelectedClienteIds(new Set())}
         />
       )}
 
