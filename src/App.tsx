@@ -3511,6 +3511,7 @@ function AppContent() {
       {showBulkEditModal && selectedClienteIds.size > 0 && (
         <BulkEditModal
           selectedClientes={clientes.filter(c => selectedClienteIds.has(c.id))}
+          assessores={assessoresDisponiveis}
           onClose={() => setShowBulkEditModal(false)}
           onBulkUpdate={handleBulkUpdate}
           onBulkSendPostback={handleBulkSendPostback}

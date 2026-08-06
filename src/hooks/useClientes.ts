@@ -104,12 +104,12 @@ export const useClientes = () => {
     }
 
     if (filtros.assessor && filtros.assessor !== 'todas') {
+      // Um cliente tem no máximo um assessor: comparação direta do nome
+      // normalizado, sem lista separada por barra.
       const assessorNormalized = normalizeAssessor(filtros.assessor);
-      resultado = resultado.filter(c => {
-        if (!c.assessor) return false;
-        const clienteAssessores = c.assessor.split('/').map(a => normalizeAssessor(a.trim()));
-        return clienteAssessores.includes(assessorNormalized);
-      });
+      resultado = resultado.filter(
+        c => !!c.assessor && normalizeAssessor(c.assessor) === assessorNormalized
+      );
     }
 
     if (filtros.status && filtros.status !== 'todos') {

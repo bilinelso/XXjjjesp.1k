@@ -9,7 +9,6 @@ import { useAssessores } from '../hooks/useAssessores';
 import { INVESTMENT_CATEGORIES, getCategoryByValue, formatCategoryDisplay } from '../utils/investmentCategories';
 import { DateTimePicker } from './DateTimePicker';
 import { LoadingOverlay, LoadingSpinner } from './LoadingSpinner';
-import { AssessorSelect } from './AssessorSelect';
 import { capitalizeName } from '../utils/formatters';
 import { DepositoHistoricoModal } from './DepositoHistoricoModal';
 import { WabaClientHistory } from './waba/WabaClientHistory';
@@ -120,8 +119,9 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
     deleteAgendamento
   } = useAgendamentos();
   const { columns, getDisplayName } = useKanbanColumns();
-  const { assessores, getClienteAssessores, updateClienteAssessores } = useAssessores();
-  const [selectedAssessorIds, setSelectedAssessorIds] = useState<string[]>([]);
+  const { assessores, getClienteAssessores, updateClienteAssessor } = useAssessores();
+  /** Seleção única: '' significa sem assessor. */
+  const [selectedAssessorId, setSelectedAssessorId] = useState<string>('');
 
   useEffect(() => {
     loadClientData();
@@ -133,7 +133,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
 
   useEffect(() => {
     getClienteAssessores(cliente.id).then(data => {
-      setSelectedAssessorIds(data.map((a: any) => a.id));
+      setSelectedAssessorId(data[0]?.id ?? '');
     });
   }, [cliente.assessor]);
 
@@ -163,7 +163,7 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
       ]);
       setLigacoes(ligacoesData);
       setAgendamento(agendamentoData);
-      setSelectedAssessorIds(clienteAssessores.map(a => a.id));
+      setSelectedAssessorId(clienteAssessores[0]?.id ?? '');
     } finally {
       setLoadingData(false);
     }
@@ -172,18 +172,15 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
   const handleSave = async () => {
     setSavingData(true);
     try {
-      await updateClienteAssessores(cliente.id, selectedAssessorIds);
+      await updateClienteAssessor(cliente.id, selectedAssessorId || null);
 
-      const assessorNames = assessores
-        .filter(a => selectedAssessorIds.includes(a.id))
-        .map(a => a.nome)
-        .join('/');
+      const assessorNome = assessores.find(a => a.id === selectedAssessorId)?.nome;
 
       const updates: Partial<Cliente> = {
         nome: editData.nome,
         email: editData.email,
         telefone: editData.telefone,
-        assessor: assessorNames || undefined,
+        assessor: assessorNome || undefined,
         valor_deposito: profile?.is_master
           ? editData.valor_deposito
           : (nonMasterDeposito !== '' ? parseFloat(nonMasterDeposito) : undefined),
@@ -482,12 +479,19 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium mb-1">Assessor(es)</label>
-                    <AssessorSelect
-                      assessores={assessores}
-                      selectedIds={selectedAssessorIds}
-                      onChange={setSelectedAssessorIds}
-                    />
+                    <label className="block text-sm font-medium mb-1">Assessor</label>
+                    <select
+                      value={selectedAssessorId}
+                      onChange={(e) => setSelectedAssessorId(e.target.value)}
+                      className="w-full border rounded px-3 py-2"
+                    >
+                      <option value="">Sem assessor</option>
+                      {assessores.map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.nome}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium mb-1">Valor Fundos</label>

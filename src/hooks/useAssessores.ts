@@ -48,7 +48,16 @@ export const useAssessores = () => {
     return (data || []).map((ca: any) => ca.assessores);
   };
 
-  const updateClienteAssessores = async (clienteId: string, assessorIds: string[]): Promise<void> => {
+  /**
+   * Define o assessor do cliente. Seleção única: `null` remove o vínculo.
+   *
+   * `clientes.assessor` guarda o nome puro — nada de nomes concatenados, que é
+   * o que exigia o split na leitura.
+   */
+  const updateClienteAssessor = async (
+    clienteId: string,
+    assessorId: string | null
+  ): Promise<void> => {
     const { error: deleteError } = await supabase
       .from('cliente_assessores')
       .delete()
@@ -56,25 +65,19 @@ export const useAssessores = () => {
 
     if (deleteError) throw deleteError;
 
-    if (assessorIds.length > 0) {
+    if (assessorId) {
       const { error: insertError } = await supabase
         .from('cliente_assessores')
-        .insert(assessorIds.map(assessorId => ({
-          cliente_id: clienteId,
-          assessor_id: assessorId,
-        })));
+        .insert({ cliente_id: clienteId, assessor_id: assessorId });
 
       if (insertError) throw insertError;
     }
 
-    const assessorNames = assessores
-      .filter(a => assessorIds.includes(a.id))
-      .map(a => a.nome)
-      .join('/');
+    const nome = assessores.find(a => a.id === assessorId)?.nome ?? null;
 
     await supabase
       .from('clientes')
-      .update({ assessor: assessorNames || null })
+      .update({ assessor: nome })
       .eq('id', clienteId);
   };
 
@@ -84,6 +87,6 @@ export const useAssessores = () => {
     error,
     refetch: fetchAssessores,
     getClienteAssessores,
-    updateClienteAssessores,
+    updateClienteAssessor,
   };
 };

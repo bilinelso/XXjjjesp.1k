@@ -3,6 +3,7 @@ import { X, User, Phone, Mail, Calendar, Loader2, Plus, ExternalLink, Building2 
 import { supabase } from '../../lib/supabase';
 import { formatPhoneFromJid, normalizePhoneForMatching } from '../../lib/phoneUtils';
 import { capitalizeName } from '../../utils/formatters';
+import { useAssessores } from '../../hooks/useAssessores';
 import type { Cliente } from '../../lib/api';
 
 interface WhatsAppContactModalProps {
@@ -25,6 +26,7 @@ interface FoundContact {
 }
 
 export function WhatsAppContactModal({ jid, displayName, onClose, onViewClient }: WhatsAppContactModalProps) {
+  const { assessores } = useAssessores();
   const [loading, setLoading] = useState(true);
   const [foundContact, setFoundContact] = useState<FoundContact | null>(null);
   const [creating, setCreating] = useState(false);
@@ -320,13 +322,18 @@ export function WhatsAppContactModal({ jid, displayName, onClose, onViewClient }
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Assessor</label>
-                  <input
-                    type="text"
+                  <select
                     value={newLead.assessor}
                     onChange={e => setNewLead({ ...newLead, assessor: e.target.value })}
-                    placeholder="Nome do assessor"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  />
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="">Sem assessor</option>
+                    {assessores.map(a => (
+                      <option key={a.id} value={a.nome}>
+                        {a.nome}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

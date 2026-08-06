@@ -8,6 +8,8 @@ type BulkSendResult = { successCount: number; total: number };
 
 type BulkEditModalProps = {
   selectedClientes: Cliente[];
+  /** Assessores cadastrados — o campo é seleção única, não texto livre. */
+  assessores: { id: string; nome: string }[];
   onClose: () => void;
   onBulkUpdate: (updates: Partial<Cliente>) => Promise<void>;
   onBulkSendPostback: () => Promise<BulkSendResult>;
@@ -29,6 +31,7 @@ type Feedback = {
 
 export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   selectedClientes,
+  assessores,
   onClose,
   onBulkUpdate,
   onBulkSendPostback,
@@ -190,13 +193,20 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                   <label className="block text-sm font-medium mb-2">
                     Assessor
                   </label>
-                  <input
-                    type="text"
+                  {/* Vazio = não alterar. Aplicar em massa sem escolher
+                      assessor não pode limpar o assessor de ninguém. */}
+                  <select
                     value={updates.assessor || ''}
                     onChange={(e) => setUpdates({ ...updates, assessor: e.target.value || undefined })}
-                    placeholder="Nome do assessor"
                     className="w-full border rounded px-3 py-2"
-                  />
+                  >
+                    <option value="">Não alterar</option>
+                    {assessores.map(a => (
+                      <option key={a.id} value={a.nome}>
+                        {a.nome}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
