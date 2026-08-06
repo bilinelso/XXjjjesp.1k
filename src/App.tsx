@@ -968,66 +968,38 @@ function AppContent() {
     await handleUpdateCliente(id, { status: status as any });
 
     if (status === 'depositou') {
-      const cliente = clientes.find(c => c.id === id);
+      // A assign-lead (v8) cuida sozinha do sorteio, do aviso no sininho, da
+      // mensagem no chat interno e do vínculo do assessor. O frontend só reage
+      // ao resultado — escrever isso aqui de novo geraria aviso em dobro.
       try {
         const { data, error } = await supabase.functions.invoke('assign-lead', {
           body: { cliente_id: id },
         });
 
-          if (!error && data?.assessor_nome) {
-            // Notificação no sininho
-            const { data: notif } = await supabase
-              .from('notifications')
-              .insert({
-                created_by: profile?.id,
-                title: 'Novo lead atribuído',
-                message: JSON.stringify({
-                  type: 'lead_assigned',
-                  nome: cliente?.nome,
-                  telefone: cliente?.telefone || null,
-                  cliente_id: id,
-                }),
-              })
-              .select('id')
-              .single();
-
-            if (notif?.id && data.user_id) {
-              await supabase.from('notification_recipients').insert({
-                notification_id: notif.id,
-                user_id: data.user_id,
-              });
+        if (error) {
+          console.error(
+            '[LeadDistribution] Falha ao distribuir lead',
+            { cliente_id: id, message: error.message }
+          );
+        } else if (data?.notified === false || data?.messaged === false) {
+          // A distribuição aconteceu, mas o assessor não foi avisado.
+          console.error(
+            '[LeadDistribution] Lead distribuído sem aviso completo',
+            {
+              cliente_id: id,
+              assessor: data?.assessor_nome,
+              notified: data?.notified,
+              messaged: data?.messaged,
             }
+          );
+        }
 
-            // Mensagem no chat interno
-            if (profile?.id && data.user_id && profile.id !== data.user_id) {
-              await supabase.from('internal_messages').insert({
-                sender_id: profile.id,
-                recipient_id: data.user_id,
-                message: JSON.stringify({
-                  type: 'lead_assigned',
-                  nome: cliente?.nome,
-                  telefone: cliente?.telefone || null,
-                  cliente_id: id,
-                }),
-              });
-            }
-
-            // Inserir na tabela de junção cliente_assessores
-            await supabase
-              .from('cliente_assessores')
-              .delete()
-              .eq('cliente_id', id);
-            await supabase
-              .from('cliente_assessores')
-              .insert({ cliente_id: id, assessor_id: data.assessor_id });
-
-            // Atualização otimista do modal aberto
-            if (selectedCliente && selectedCliente.id === id) {
-              setSelectedCliente(prev => prev ? { ...prev, assessor: data.assessor_nome } : prev);
-            }
-          }
+        // Atualização otimista do modal aberto
+        if (data?.assessor_nome && selectedCliente && selectedCliente.id === id) {
+          setSelectedCliente(prev => prev ? { ...prev, assessor: data.assessor_nome } : prev);
+        }
       } catch (err) {
-        console.error('[LeadDistribution] Erro ao distribuir lead:', err);
+        console.error('[LeadDistribution] Erro ao distribuir lead:', { cliente_id: id, err });
       }
     }
 
