@@ -163,6 +163,53 @@ function upsertMessage(prev: LocalMessage[], incoming: WabaMessage): LocalMessag
   );
 }
 
+/**
+ * Prioridade da conversa na lista, do mais urgente ao menos:
+ *
+ * 0. não lida, janela aberta   — dá para responder, e o relógio está correndo
+ * 1. não lida, janela fechada  — precisa de atenção, mas só por template
+ * 2. lida, janela aberta
+ * 3. lida, janela fechada
+ */
+function chatPriority(chat: WabaChatWithContact, now: number): number {
+  const unread = (chat.unread_count || 0) > 0;
+  // Sem `last_inbound_at` o computeWindow devolve fechada — é o que queremos.
+  const open = computeWindow(chat.waba_contacts?.last_inbound_at, now).open;
+  if (unread) return open ? 0 : 1;
+  return open ? 2 : 3;
+}
+
+function timestampDesc(a: WabaChatWithContact, b: WabaChatWithContact): number {
+  return (
+    new Date(b.last_message_timestamp || 0).getTime() -
+    new Date(a.last_message_timestamp || 0).getTime()
+  );
+}
+
+/**
+ * Ordena a lista de conversas por grupo de urgência.
+ *
+ * Depende de `now`: a janela de 24h expira com o tempo, não só com eventos, e
+ * a ordem precisa acompanhar o relógio do componente.
+ */
+function sortChats(chats: WabaChatWithContact[], now: number): WabaChatWithContact[] {
+  return [...chats].sort((a, b) => {
+    const priorityA = chatPriority(a, now);
+    const priorityB = chatPriority(b, now);
+    if (priorityA !== priorityB) return priorityA - priorityB;
+
+    // Dentro das não lidas com janela aberta, quem expira antes vem primeiro:
+    // perder a janela transforma uma resposta livre em template pago.
+    if (priorityA === 0) {
+      const remainingA = computeWindow(a.waba_contacts?.last_inbound_at, now).remainingMs;
+      const remainingB = computeWindow(b.waba_contacts?.last_inbound_at, now).remainingMs;
+      if (remainingA !== remainingB) return remainingA - remainingB;
+    }
+
+    return timestampDesc(a, b);
+  });
+}
+
 export const WabaView: React.FC<WabaViewProps> = ({
   onUnreadCountChange,
   onOpenCliente,
@@ -352,16 +399,23 @@ export const WabaView: React.FC<WabaViewProps> = ({
     onUnreadCountChange?.(totalUnread);
   }, [totalUnread, onUnreadCountChange]);
 
+  // A ordem é aplicada aqui, no ponto único onde a lista é montada: assim vale
+  // para a carga inicial, para o que chega pelo realtime e para o tique do
+  // relógio (`now`), que faz janelas expirarem e reordenarem sozinhas.
   const filteredChats = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return chats;
     const digits = term.replace(/\D/g, '');
-    return chats.filter(chat => {
-      const name = resolveChatName(chat).toLowerCase();
-      const phone = chat.waba_contacts?.contact_phone || '';
-      return name.includes(term) || (digits.length > 0 && phone.includes(digits));
-    });
-  }, [chats, search]);
+
+    const matching = term
+      ? chats.filter(chat => {
+          const name = resolveChatName(chat).toLowerCase();
+          const phone = chat.waba_contacts?.contact_phone || '';
+          return name.includes(term) || (digits.length > 0 && phone.includes(digits));
+        })
+      : chats;
+
+    return sortChats(matching, now);
+  }, [chats, search, now]);
 
   const selectedChat = useMemo(
     () => chats.find(chat => chat.id === selectedChatId) || null,
@@ -528,20 +582,19 @@ export const WabaView: React.FC<WabaViewProps> = ({
     }
   }, []);
 
-  /** Atualiza a prévia na lista sem refazer o SELECT — o realtime confirma depois. */
+  /**
+   * Atualiza a prévia na lista sem refazer o SELECT — o realtime confirma
+   * depois. Não reordena: a ordem de exibição é responsabilidade única do
+   * `sortChats` em `filteredChats`, e um sort só por timestamp aqui competiria
+   * com os grupos de urgência.
+   */
   const touchChatPreview = (chatId: string, text: string, timestamp: string) => {
     setChats(prev =>
-      prev
-        .map(c =>
-          c.id === chatId
-            ? { ...c, last_message_text: text, last_message_timestamp: timestamp, last_message_from_me: true }
-            : c
-        )
-        .sort(
-          (a, b) =>
-            new Date(b.last_message_timestamp || 0).getTime() -
-            new Date(a.last_message_timestamp || 0).getTime()
-        )
+      prev.map(c =>
+        c.id === chatId
+          ? { ...c, last_message_text: text, last_message_timestamp: timestamp, last_message_from_me: true }
+          : c
+      )
     );
   };
 
