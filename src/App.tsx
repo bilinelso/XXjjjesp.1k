@@ -1576,7 +1576,7 @@ function AppContent() {
               )}
             </p>
             <div className="flex items-center gap-2">
-              <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} />
+              <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} onOpenWabaChat={handleOpenWabaChat} />
               <button
                 onClick={handleRefresh}
                 disabled={isRefreshing}
@@ -1615,7 +1615,7 @@ function AppContent() {
               alt="Strate Finance"
               className="h-7 w-auto object-contain"
             />
-            <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} />
+            <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} onOpenWabaChat={handleOpenWabaChat} />
           </div>
         )}
 
@@ -3528,7 +3528,9 @@ function AppContent() {
         />
       )}
 
-      {!hideInternalChat && <InternalChat onOpenWhatsApp={handleOpenWhatsApp} />}
+      {!hideInternalChat && (
+        <InternalChat onOpenWhatsApp={handleOpenWhatsApp} onOpenWabaChat={handleOpenWabaChat} />
+      )}
 
       {showAddLeadModal && (
         <AddLeadManualModal

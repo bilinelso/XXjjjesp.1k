@@ -1,4 +1,5 @@
 import { X, FileText, MessageCircle, User } from 'lucide-react';
+import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
 
 export interface NotificationData {
   id: string;
@@ -28,9 +29,15 @@ interface NotificationModalProps {
   notification: NotificationData;
   onClose: () => void;
   onOpenWhatsApp?: (phone: string) => void;
+  onOpenWabaChat?: (chatId: string) => void;
 }
 
-export function NotificationModal({ notification, onClose, onOpenWhatsApp }: NotificationModalProps) {
+export function NotificationModal({
+  notification,
+  onClose,
+  onOpenWhatsApp,
+  onOpenWabaChat,
+}: NotificationModalProps) {
   const lead = tryParseLeadAssigned(notification.message);
 
   return (
@@ -55,7 +62,20 @@ export function NotificationModal({ notification, onClose, onOpenWhatsApp }: Not
                   O cliente <span className="font-semibold">{lead.nome || '—'}</span> foi atribuído a você.
                 </span>
               </div>
-              {lead.telefone && (
+              {/* Sem `cliente_id` (payload antigo ou malformado) não dá para
+                  resolver a conversa oficial — cai no comportamento antigo. */}
+              {lead.telefone && lead.cliente_id && onOpenWabaChat ? (
+                <WhatsAppChannelMenu
+                  clienteId={lead.cliente_id}
+                  telefone={lead.telefone}
+                  onOpenQr={phone => { onClose(); onOpenWhatsApp?.(phone); }}
+                  onOpenWaba={chatId => { onClose(); onOpenWabaChat(chatId); }}
+                  className="flex items-center gap-2 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors"
+                >
+                  <MessageCircle size={15} />
+                  Abrir conversa: {lead.telefone}
+                </WhatsAppChannelMenu>
+              ) : lead.telefone ? (
                 <button
                   onClick={() => {
                     if (onOpenWhatsApp) {
@@ -68,7 +88,7 @@ export function NotificationModal({ notification, onClose, onOpenWhatsApp }: Not
                   <MessageCircle size={15} />
                   Abrir conversa: {lead.telefone}
                 </button>
-              )}
+              ) : null}
             </div>
           ) : (
             <div

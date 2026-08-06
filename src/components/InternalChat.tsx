@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { MessageCircle, X, Send, ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotifications } from '../hooks/useNotifications';
 
@@ -48,9 +49,10 @@ function getAvatarColor(userId: string): string {
 
 interface InternalChatProps {
   onOpenWhatsApp?: (phone: string) => void;
+  onOpenWabaChat?: (chatId: string) => void;
 }
 
-export function InternalChat({ onOpenWhatsApp }: InternalChatProps) {
+export function InternalChat({ onOpenWhatsApp, onOpenWabaChat }: InternalChatProps) {
   const { user, profile } = useAuth();
   const { notifyChat } = useNotifications();
   const [open, setOpen] = useState(false);
@@ -355,14 +357,26 @@ export function InternalChat({ onOpenWhatsApp }: InternalChatProps) {
           <div className="flex flex-col gap-0.5">
             <span className="font-semibold text-sm">📋 Novo lead atribuído</span>
             <span className="text-sm">{parsed.nome}</span>
-            {parsed.telefone && onOpenWhatsApp && (
+            {/* Sem `cliente_id` (mensagem gravada antes do campo existir) não
+                dá para resolver a conversa oficial — mantém o botão direto. */}
+            {parsed.telefone && onOpenWhatsApp && parsed.cliente_id && onOpenWabaChat ? (
+              <WhatsAppChannelMenu
+                clienteId={parsed.cliente_id}
+                telefone={parsed.telefone}
+                onOpenQr={onOpenWhatsApp}
+                onOpenWaba={onOpenWabaChat}
+                className="text-left text-sm font-medium underline opacity-90 hover:opacity-100 transition-opacity"
+              >
+                📱 {parsed.telefone}
+              </WhatsAppChannelMenu>
+            ) : parsed.telefone && onOpenWhatsApp ? (
               <button
                 onClick={() => onOpenWhatsApp(parsed.telefone)}
                 className="text-left text-sm font-medium underline opacity-90 hover:opacity-100 transition-opacity"
               >
                 📱 {parsed.telefone}
               </button>
-            )}
+            ) : null}
             {parsed.telefone && !onOpenWhatsApp && (
               <span className="text-sm opacity-80">📱 {parsed.telefone}</span>
             )}
