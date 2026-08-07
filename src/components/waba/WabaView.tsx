@@ -3,6 +3,7 @@ import { BadgeCheck, Search, AlertTriangle, Clock, User, Send, ExternalLink, Mes
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { useNotifications } from '../../hooks/useNotifications';
 import { MD_QUERY } from '../../lib/viewRouting';
 import { wabaApi } from '../../lib/wabaApi';
 import type {
@@ -112,6 +113,23 @@ function newLocalId(): string {
   return `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function wabaNotificationPreview(message: WabaMessage): string {
+  switch (message.message_type) {
+    case 'audio':
+      return 'Audio';
+    case 'image':
+      return 'Imagem';
+    case 'video':
+      return 'Video';
+    case 'document':
+      return 'Documento';
+    case 'sticker':
+      return 'Figurinha';
+    default:
+      return message.message_text?.trim().slice(0, 80) || 'Nova mensagem';
+  }
+}
+
 function revokeLocalMedia(message: LocalMessage): void {
   if (message.localMediaUrl) URL.revokeObjectURL(message.localMediaUrl);
 }
@@ -219,6 +237,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
   onOpenChatHandled,
 }) => {
   const { user, profile } = useAuth();
+  const { notifyWhatsApp } = useNotifications();
   // Abaixo de `md` o módulo vira coluna única: ou a lista, ou a conversa.
   const isMobile = !useMediaQuery(MD_QUERY);
   // Sincronizar template é configuração, não atendimento.
@@ -254,6 +273,8 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const [now, setNow] = useState(() => Date.now());
 
   const selectedChatIdRef = useRef<string | null>(null);
+  const chatsRef = useRef<WabaChatWithContact[]>([]);
+  const notifyWhatsAppRef = useRef(notifyWhatsApp);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   /** Única trava que sobrou: impede o duplo clique reenviar o mesmo texto. */
@@ -264,6 +285,14 @@ export const WabaView: React.FC<WabaViewProps> = ({
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    chatsRef.current = chats;
+  }, [chats]);
+
+  useEffect(() => {
+    notifyWhatsAppRef.current = notifyWhatsApp;
+  }, [notifyWhatsApp]);
 
   // Saída abrupta (troca de view, logout) não pode vazar os blob URLs das
   // otimistas de mídia ainda na lista.
@@ -421,9 +450,40 @@ export const WabaView: React.FC<WabaViewProps> = ({
         { event: '*', schema: 'public', table: 'waba_messages' },
         payload => {
           const message = payload.new as WabaMessage | undefined;
-          if (!message || message.chat_id !== selectedChatIdRef.current) return;
+          if (!message) return;
 
-          setMessages(prev => upsertMessage(prev, message));
+          if (message.chat_id === selectedChatIdRef.current) {
+            setMessages(prev => upsertMessage(prev, message));
+          }
+
+          if (
+            payload.eventType !== 'INSERT' ||
+            message.from_me ||
+            (message.chat_id === selectedChatIdRef.current && document.visibilityState === 'visible')
+          ) {
+            return;
+          }
+
+          void (async () => {
+            let chat = chatsRef.current.find(c => c.id === message.chat_id) || null;
+
+            if (!chat) {
+              const { data } = await supabase
+                .from('waba_chats')
+                .select(CHAT_SELECT)
+                .eq('id', message.chat_id)
+                .maybeSingle();
+              chat = (data as WabaChatWithContact | null) || null;
+            }
+
+            if (!chat || chat.assessor_user_id !== user.id) return;
+
+            notifyWhatsAppRef.current(
+              resolveChatName(chat),
+              wabaNotificationPreview(message),
+              'WhatsApp Oficial'
+            );
+          })();
         }
       )
       .subscribe();

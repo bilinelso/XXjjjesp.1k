@@ -92,12 +92,16 @@ export function useNotifications() {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
-  const notifyWhatsApp = (contactName: string, messagePreview: string) => {
+  const notifyWhatsApp = (
+    contactName: string,
+    messagePreview: string,
+    titlePrefix = 'WhatsApp'
+  ) => {
     requestPermissionOnce();
     playNotificationSound('whatsapp');
     if (document.visibilityState !== 'visible') {
       incrementBadge();
-      showOsNotification(`WhatsApp: ${contactName}`, messagePreview);
+      showOsNotification(`${titlePrefix}: ${contactName}`, messagePreview);
     }
   };
 

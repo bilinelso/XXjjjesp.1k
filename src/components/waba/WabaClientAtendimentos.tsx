@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Headset, ChevronRight, ChevronLeft, RotateCcw } from 'lucide-react';
+import { Headset, ChevronRight, ChevronLeft, RotateCcw, User } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
-import { atendimentoMotivoLabel, type WabaAtendimento } from '../../lib/wabaApi';
+import { atendimentoFechamentoLabel, type WabaAtendimentoDetalhe } from '../../lib/wabaApi';
 import { formatMessageTime } from './wabaUtils';
 
 type WabaClientAtendimentosProps = {
@@ -21,7 +21,7 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
   clienteId,
   onOpenChat,
 }) => {
-  const [atendimentos, setAtendimentos] = useState<WabaAtendimento[]>([]);
+  const [atendimentos, setAtendimentos] = useState<WabaAtendimentoDetalhe[]>([]);
   const [loading, setLoading] = useState(true);
   /** Um atendimento por página, igual ao "Registro de interações". */
   const [page, setPage] = useState(0);
@@ -31,14 +31,15 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
     setLoading(true);
     setPage(0); // trocar de cliente sempre abre na primeira página
 
+    // A view traz os nomes já resolvidos; as policies são as mesmas da tabela.
     supabase
-      .from('waba_atendimentos')
+      .from('waba_atendimentos_detalhe')
       .select('*')
       .eq('cliente_id', clienteId)
       .order('aberto_em', { ascending: false })
       .then(({ data, error }) => {
         if (cancelled) return;
-        if (!error) setAtendimentos((data || []) as WabaAtendimento[]);
+        if (!error) setAtendimentos((data || []) as WabaAtendimentoDetalhe[]);
         setLoading(false);
       });
 
@@ -59,6 +60,15 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
     });
   }, [atendimentos]);
 
+  /**
+   * O nome do assessor só aparece quando o cliente passou por mais de um —
+   * com um só, seria a mesma informação repetida em todas as linhas.
+   */
+  const variosAssessores = useMemo(() => {
+    const nomes = new Set(atendimentos.map(a => a.assessor_user_id));
+    return nomes.size > 1;
+  }, [atendimentos]);
+
   // Sem atendimentos (ou ainda carregando) a seção não ocupa espaço na ficha.
   if (loading || sorted.length === 0) return null;
 
@@ -77,8 +87,15 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
         <p className="text-xs text-slate-500 mt-0.5">
           {emAndamento
             ? 'Em andamento'
-            : `${atendimentoMotivoLabel(atendimento.fechado_motivo)} · ${formatMessageTime(atendimento.fechado_em)}`}
+            : `${atendimentoFechamentoLabel(atendimento.fechado_motivo, atendimento.fechado_por_nome)} · ${formatMessageTime(atendimento.fechado_em)}`}
         </p>
+
+        {variosAssessores && atendimento.assessor_nome && (
+          <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
+            <User size={12} className="flex-shrink-0" />
+            Atendimento de {atendimento.assessor_nome}
+          </p>
+        )}
         {/* Sem reabertura, a linha fica exatamente como era. */}
         {reaberturas > 0 && (
           <p className="text-xs text-amber-700 mt-0.5 flex items-center gap-1">

@@ -328,6 +328,43 @@ export function atendimentoMotivoLabel(motivo: string | null | undefined): strin
   return 'Atendimento encerrado';
 }
 
+/**
+ * Linhas da view `waba_atendimentos_detalhe`: as mesmas colunas da tabela mais
+ * os nomes resolvidos. A view usa `security_invoker`, então enxerga
+ * exatamente o que as policies de `waba_atendimentos` permitem.
+ */
+export interface WabaAtendimentoDetalhe extends WabaAtendimento {
+  assessor_nome: string | null;
+  /** Null quando o encerramento foi automático (janela de 24h). */
+  fechado_por_nome: string | null;
+}
+
+/**
+ * Motivo do encerramento com o nome de quem encerrou.
+ *
+ * `troca_assessor` sempre nomeia quem fez a troca: o atendimento pode ser de um
+ * assessor e ter sido encerrado por outra pessoa ao reatribuir o cliente, e
+ * omitir isso esconderia justamente o caso que interessa. Sem nome, cai no
+ * texto sem nome em vez de exibir um vazio.
+ */
+export function atendimentoFechamentoLabel(
+  motivo: string | null | undefined,
+  fechadoPorNome: string | null | undefined
+): string {
+  const nome = fechadoPorNome?.trim();
+  if (!nome) return atendimentoMotivoLabel(motivo);
+
+  switch (motivo) {
+    case 'manual':
+      return `Finalizado por ${nome}`;
+    case 'troca_assessor':
+      return `Encerrado por ${nome} ao trocar o assessor`;
+    default:
+      // janela_24h é automático e não tem nome; qualquer motivo novo cai aqui.
+      return atendimentoMotivoLabel(motivo);
+  }
+}
+
 export interface WabaTemplate {
   id: string;
   name: string;
