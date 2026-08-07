@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BadgeCheck, Search, AlertTriangle, Clock, User, Send, ExternalLink, MessageSquare, ArrowLeft, MoreVertical, Copy, RotateCw, RefreshCw, MessageCircle } from 'lucide-react';
+import { BadgeCheck, Search, AlertTriangle, Clock, User, Send, ExternalLink, MessageSquare, ArrowLeft, MoreVertical, Copy, RotateCw, RefreshCw, MessageCircle, CheckCheck } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -471,6 +471,26 @@ export const WabaView: React.FC<WabaViewProps> = ({
     () => computeWindow(selectedChat?.waba_contacts?.last_inbound_at, now),
     [selectedChat, now]
   );
+
+  const atendimentoAberto = !!selectedChat && openAtendimentos.has(selectedChat.id);
+
+  /**
+   * Fronteiras entre ciclos de atendimento, para o divisor no chat.
+   *
+   * O primeiro atendimento não gera divisor — ele marca o início da conversa,
+   * não uma transição. Cada fronteira carrega o desfecho do ciclo ANTERIOR,
+   * que é o que o rótulo precisa dizer.
+   */
+  const atendimentoBoundaries = useMemo(() => {
+    return chatAtendimentos.slice(1).map((atendimento, index) => {
+      const anterior = chatAtendimentos[index];
+      return {
+        at: new Date(atendimento.aberto_em).getTime(),
+        label: atendimentoMotivoLabel(anterior.fechado_motivo),
+        fechadoEm: anterior.fechado_em,
+      };
+    });
+  }, [chatAtendimentos]);
 
   /**
    * No mobile o status da janela vira subtítulo do header em vez de disputar
@@ -1094,11 +1114,18 @@ export const WabaView: React.FC<WabaViewProps> = ({
                         {chat.last_message_from_me ? 'Você: ' : ''}
                         {chat.last_message_text || 'Sem mensagens'}
                       </span>
-                      {unread > 0 && (
-                        <span className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] rounded-full font-medium min-w-[18px] text-center leading-none">
+                      {/* O contador some ao abrir (unread_count zera); o ponto
+                          fica enquanto o atendimento não for finalizado. */}
+                      {unread > 0 ? (
+                        <span className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] rounded-full font-medium min-w-[18px] text-center leading-none flex-shrink-0">
                           {unread > 99 ? '99+' : unread}
                         </span>
-                      )}
+                      ) : emAtendimento ? (
+                        <span
+                          title="Atendimento em aberto"
+                          className="w-2.5 h-2.5 rounded-full bg-red-500 flex-shrink-0"
+                        />
+                      ) : null}
                     </div>
                   </button>
                 );
@@ -1171,6 +1198,18 @@ export const WabaView: React.FC<WabaViewProps> = ({
                         aria-hidden="true"
                       />
                       <div className="absolute right-1 top-[calc(100%-4px)] z-50 w-60 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                        {atendimentoAberto && (
+                          <button
+                            onClick={() => { setMenuOpen(false); handleFinalizarAtendimento(); }}
+                            disabled={finalizando}
+                            className="w-full min-h-[44px] px-3 py-2 flex items-center gap-2.5 text-sm text-emerald-700 hover:bg-emerald-50 disabled:opacity-60 transition-colors text-left"
+                          >
+                            <CheckCheck size={16} className="text-emerald-600 flex-shrink-0" />
+                            <span className="flex-1">
+                              {finalizando ? 'Finalizando...' : 'Finalizar atendimento'}
+                            </span>
+                          </button>
+                        )}
                         {selectedChat.waba_contacts?.cliente_id && onOpenCliente && (
                           <button
                             onClick={() => {
@@ -1250,6 +1289,17 @@ export const WabaView: React.FC<WabaViewProps> = ({
                         <ExternalLink size={11} />
                       </button>
                     )}
+
+                    {atendimentoAberto && (
+                      <button
+                        onClick={handleFinalizarAtendimento}
+                        disabled={finalizando}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-50 disabled:opacity-60 transition-colors whitespace-nowrap"
+                      >
+                        <CheckCheck size={14} />
+                        {finalizando ? 'Finalizando...' : 'Finalizar atendimento'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1264,12 +1314,31 @@ export const WabaView: React.FC<WabaViewProps> = ({
                       : 'Nenhuma mensagem ainda. Como o cliente nunca escreveu para o número oficial, o primeiro contato precisa ser um template aprovado.'}
                   </p>
                 ) : (
-                  messages.map(message => {
+                  messages.map((message, index) => {
                     const statusLabel = messageStatusLabel(message.status);
                     const isSticker = message.message_type === 'sticker';
+
+                    // Divisor: a mensagem cruzou o `aberto_em` de um novo ciclo.
+                    const messageAt = new Date(message.timestamp).getTime();
+                    const previousAt =
+                      index > 0 ? new Date(messages[index - 1].timestamp).getTime() : -Infinity;
+                    const boundary = atendimentoBoundaries.find(
+                      b => previousAt < b.at && messageAt >= b.at
+                    );
+
                     return (
+                      <React.Fragment key={message.id}>
+                      {boundary && (
+                        <div className="flex items-center gap-3 py-2">
+                          <span className="flex-1 h-px bg-slate-300" />
+                          <span className="text-[11px] text-slate-500 text-center px-2">
+                            {boundary.label}
+                            {boundary.fechadoEm && ` · ${formatMessageTime(boundary.fechadoEm)}`}
+                          </span>
+                          <span className="flex-1 h-px bg-slate-300" />
+                        </div>
+                      )}
                       <div
-                        key={message.id}
                         className={`flex ${message.from_me ? 'justify-end' : 'justify-start'}`}
                       >
                         <div
@@ -1337,6 +1406,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
                           </div>
                         </div>
                       </div>
+                      </React.Fragment>
                     );
                   })
                 )}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock, Menu, Monitor, Smartphone } from 'lucide-react';
+import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MinusSquare, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock, Menu, Monitor, Smartphone } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
@@ -45,6 +45,15 @@ import { useViewRoute } from './hooks/useViewRoute';
 
 /** "Ver versão completa" vale pela sessão — sobrevive ao F5, não ao fechar a aba. */
 const FULL_VERSION_KEY = 'crm_mobile_full_version';
+
+const ITEMS_PER_PAGE_OPTIONS = [25, 50, 100, 200];
+
+export type BulkUpdateResult = {
+  updated: number;
+  failed: number;
+  total: number;
+  errors: string[];
+};
 
 function NavItem({ icon, label, active, collapsed, onClick, badge }: {
   icon: React.ReactNode; label: string; active: boolean; collapsed: boolean; onClick: () => void; badge?: string;
@@ -214,7 +223,25 @@ function AppContent() {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [currentPageClientes, setCurrentPageClientes] = useState(1);
   const [currentPageFormularios, setCurrentPageFormularios] = useState(1);
+  /** Formulários tem ~17k registros e fica fora do seletor — segue fixo. */
   const itemsPerPage = 100;
+
+  const [itemsPerPageClientes, setItemsPerPageClientes] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('crm_itens_por_pagina_clientes'));
+      return ITEMS_PER_PAGE_OPTIONS.includes(saved) ? saved : 100;
+    } catch {
+      return 100;
+    }
+  });
+
+  const handleItemsPerPageChange = (value: number) => {
+    setItemsPerPageClientes(value);
+    setCurrentPageClientes(1); // o item que estava na página 5 pode nem existir mais
+    try {
+      localStorage.setItem('crm_itens_por_pagina_clientes', String(value));
+    } catch { /* storage indisponível */ }
+  };
   const [selectedClienteIds, setSelectedClienteIds] = useState<Set<string>>(new Set());
   const [showBulkEditModal, setShowBulkEditModal] = useState(false);
   const [showSelectionBroadcast, setShowSelectionBroadcast] = useState(false);
@@ -415,14 +442,22 @@ function AppContent() {
     return filtered;
   }, [leads, formularioSearchQuery, ocultarDuplicados]);
 
-  const totalPagesClientes = Math.ceil(clientesOrdenados.length / itemsPerPage);
+  const totalPagesClientes = Math.ceil(clientesOrdenados.length / itemsPerPageClientes);
   const totalPagesFormularios = Math.ceil(leadsFiltrados.length / itemsPerPage);
 
+  /** 'all' | 'partial' | 'none' — dirige o ícone do checkbox do cabeçalho. */
+  const selectionState = React.useMemo(() => {
+    if (selectedClienteIds.size === 0 || clientesOrdenados.length === 0) return 'none';
+    const selecionadosNaLista = clientesOrdenados.filter(c => selectedClienteIds.has(c.id)).length;
+    if (selecionadosNaLista === 0) return 'none';
+    return selecionadosNaLista === clientesOrdenados.length ? 'all' : 'partial';
+  }, [clientesOrdenados, selectedClienteIds]);
+
   const clientesPaginados = React.useMemo(() => {
-    const startIndex = (currentPageClientes - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
+    const startIndex = (currentPageClientes - 1) * itemsPerPageClientes;
+    const endIndex = startIndex + itemsPerPageClientes;
     return clientesOrdenados.slice(startIndex, endIndex);
-  }, [clientesOrdenados, currentPageClientes, itemsPerPage]);
+  }, [clientesOrdenados, currentPageClientes, itemsPerPageClientes]);
 
   const formulariosPaginados = React.useMemo(() => {
     const startIndex = (currentPageFormularios - 1) * itemsPerPage;
@@ -857,37 +892,58 @@ function AppContent() {
     });
   };
 
+  /**
+   * Opera sobre a lista filtrada INTEIRA, não só a página visível: com 100 por
+   * página e 800+ clientes, selecionar "tudo" precisa significar tudo.
+   */
   const toggleAllClientesSelection = () => {
-    const visibleClienteIds = clientesPaginados.map(c => c.id);
-    const allSelected = visibleClienteIds.every(id => selectedClienteIds.has(id));
-
-    setSelectedClienteIds(prev => {
-      const newSet = new Set(prev);
-      if (allSelected) {
-        visibleClienteIds.forEach(id => newSet.delete(id));
-      } else {
-        visibleClienteIds.forEach(id => newSet.add(id));
-      }
-      return newSet;
-    });
+    if (selectionState === 'none') {
+      setSelectedClienteIds(new Set(clientesOrdenados.map(c => c.id)));
+    } else {
+      setSelectedClienteIds(new Set());
+    }
   };
 
-  const handleBulkUpdate = async (updates: Partial<Cliente>) => {
-    const selectedClientes = Array.from(selectedClienteIds);
-    let successCount = 0;
+  /**
+   * Edição em massa em lote.
+   *
+   * Um UPDATE por cliente travava a aba por minutos com centenas selecionados.
+   * Aqui vai um `.in('id', ...)` por bloco; os números do relatório vêm das
+   * linhas que o banco devolve, não de contagem otimista.
+   *
+   * Não dispara distribuição automática — `assign-lead` continua fora daqui.
+   */
+  const handleBulkUpdate = async (
+    updates: Partial<Cliente>,
+    onProgress?: (done: number, total: number) => void
+  ): Promise<BulkUpdateResult> => {
+    const ids = Array.from(selectedClienteIds);
+    const CHUNK_SIZE = 200; // acima disso o payload da query fica grande demais
+    let updated = 0;
+    const errors: string[] = [];
 
-    for (const clienteId of selectedClientes) {
-      try {
-        await handleUpdateCliente(clienteId, updates);
-        successCount++;
-      } catch (error) {
-        console.error(`Erro ao atualizar cliente ${clienteId}:`, error);
+    onProgress?.(0, ids.length);
+
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      const chunk = ids.slice(i, i + CHUNK_SIZE);
+      const { data, error } = await supabase
+        .from('clientes')
+        .update({ ...updates, updated_at: new Date().toISOString() })
+        .in('id', chunk)
+        .select('id');
+
+      if (error) {
+        errors.push(error.message);
+      } else {
+        updated += (data || []).length;
       }
+      onProgress?.(Math.min(i + CHUNK_SIZE, ids.length), ids.length);
     }
 
     await fetchClientes(true);
     setSelectedClienteIds(new Set());
-    alert(`${successCount} de ${selectedClientes.length} cliente(s) atualizado(s) com sucesso!`);
+
+    return { updated, failed: ids.length - updated, total: ids.length, errors };
   };
 
   const handleBulkSendPostback = async () => {
@@ -968,9 +1024,10 @@ function AppContent() {
     await handleUpdateCliente(id, { status: status as any });
 
     if (status === 'depositou') {
-      // A assign-lead (v8) cuida sozinha do sorteio, do aviso no sininho, da
-      // mensagem no chat interno e do vínculo do assessor. O frontend só reage
-      // ao resultado — escrever isso aqui de novo geraria aviso em dobro.
+      // A assign-lead cuida do sorteio e do vínculo do assessor. O aviso no
+      // sininho e a mensagem do chat interno vêm do trigger
+      // trg_notificar_mudanca_assessor, que dispara em qualquer alteração de
+      // clientes.assessor — o frontend não cria nenhum dos dois.
       try {
         const { data, error } = await supabase.functions.invoke('assign-lead', {
           body: { cliente_id: id },
@@ -980,17 +1037,6 @@ function AppContent() {
           console.error(
             '[LeadDistribution] Falha ao distribuir lead',
             { cliente_id: id, message: error.message }
-          );
-        } else if (data?.notified === false || data?.messaged === false) {
-          // A distribuição aconteceu, mas o assessor não foi avisado.
-          console.error(
-            '[LeadDistribution] Lead distribuído sem aviso completo',
-            {
-              cliente_id: id,
-              assessor: data?.assessor_nome,
-              notified: data?.notified,
-              messaged: data?.messaged,
-            }
           );
         }
 
@@ -1576,7 +1622,11 @@ function AppContent() {
               )}
             </p>
             <div className="flex items-center gap-2">
-              <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} onOpenWabaChat={handleOpenWabaChat} />
+              <NotificationBell
+              onOpenWhatsApp={handleOpenWhatsApp}
+              onOpenWabaChat={handleOpenWabaChat}
+              onOpenCliente={handleOpenClienteFromWaba}
+            />
               <button
                 onClick={handleRefresh}
                 disabled={isRefreshing}
@@ -1615,7 +1665,11 @@ function AppContent() {
               alt="Strate Finance"
               className="h-7 w-auto object-contain"
             />
-            <NotificationBell onOpenWhatsApp={handleOpenWhatsApp} onOpenWabaChat={handleOpenWabaChat} />
+            <NotificationBell
+              onOpenWhatsApp={handleOpenWhatsApp}
+              onOpenWabaChat={handleOpenWabaChat}
+              onOpenCliente={handleOpenClienteFromWaba}
+            />
           </div>
         )}
 
@@ -1893,8 +1947,15 @@ function AppContent() {
           </div>
         )}
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto">
+        {/* Scrollable content.
+            Rola nos DOIS eixos de propósito: um wrapper com `overflow-x-auto`
+            em volta da tabela vira container de scroll também no eixo Y (o CSS
+            força `overflow-y: auto` quando o X é auto), e aí o `thead` sticky
+            gruda naquele container — que nunca rola — em vez do de fora. Com um
+            único container rolando, o topo do scrollport já fica exatamente
+            abaixo do header e da barra de filtros, e `top: 0` no `thead` basta:
+            não há offset a calcular. */}
+        <div className="flex-1 overflow-auto">
       {isRefreshing ? (
         <div className="min-h-[calc(100vh-180px)] bg-white flex items-center justify-center">
           <div className="text-center">
@@ -1912,7 +1973,7 @@ function AppContent() {
               <div className="flex items-center gap-3">
                 <CheckSquare className="text-blue-600" size={20} />
                 <span className="font-semibold text-blue-800">
-                  {selectedClienteIds.size} cliente(s) selecionado(s)
+                  {selectedClienteIds.size} de {clientesOrdenados.length} cliente(s) selecionado(s)
                 </span>
               </div>
               <div className="flex gap-2">
@@ -1976,7 +2037,10 @@ function AppContent() {
               </div>
             </div>
           )}
-          <div className="bg-white md:rounded-lg shadow-sm border-y md:border border-slate-200 overflow-hidden">
+          {/* Sem `overflow-hidden`: qualquer ancestral com overflow entre o
+              container de scroll e a tabela vira o contexto do sticky e o
+              cabeçalho para de grudar. */}
+          <div className="bg-white md:rounded-lg shadow-sm border-y md:border border-slate-200">
             {!isMdUp ? (
               <LeadCardList
                 clientes={clientesPaginados}
@@ -1991,17 +2055,24 @@ function AppContent() {
                 formatarData={formatarData}
               />
             ) : (
-            <div className="overflow-x-auto">
+            <div>
               <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
+                <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
                   <tr>
                     <th className="px-4 py-4 text-center w-12">
                       <button
                         onClick={toggleAllClientesSelection}
+                        title={
+                          selectionState === 'all'
+                            ? 'Limpar seleção'
+                            : `Selecionar todos os ${clientesOrdenados.length} clientes filtrados`
+                        }
                         className="hover:bg-slate-200 p-1 rounded transition-colors"
                       >
-                        {clientesPaginados.every(c => selectedClienteIds.has(c.id)) ? (
+                        {selectionState === 'all' ? (
                           <CheckSquare size={18} className="text-blue-600" />
+                        ) : selectionState === 'partial' ? (
+                          <MinusSquare size={18} className="text-blue-600" />
                         ) : (
                           <Square size={18} className="text-slate-400" />
                         )}
@@ -2217,7 +2288,9 @@ function AppContent() {
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               totalItems={clientesOrdenados.length}
-              itemsPerPage={itemsPerPage}
+              itemsPerPage={itemsPerPageClientes}
+              itemsPerPageOptions={ITEMS_PER_PAGE_OPTIONS}
+              onItemsPerPageChange={handleItemsPerPageChange}
             />
           </div>
         </div>
@@ -3055,9 +3128,11 @@ function AppContent() {
             </button>
           </div>
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Sem overflow aqui: o scroll (X e Y) é do container da view,
+                senão o `thead` sticky gruda neste div, que nunca rola. */}
+            <div>
               <table className="w-full">
-                <thead className="bg-slate-50 border-b border-slate-200">
+                <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
                   <tr>
                     <th className="text-left px-6 py-4 text-sm font-semibold text-slate-700">Nome</th>
                     <th className="text-left px-6 py-4 text-sm font-semibold text-slate-700">Telefone</th>
@@ -3530,7 +3605,11 @@ function AppContent() {
       )}
 
       {!hideInternalChat && (
-        <InternalChat onOpenWhatsApp={handleOpenWhatsApp} onOpenWabaChat={handleOpenWabaChat} />
+        <InternalChat
+          onOpenWhatsApp={handleOpenWhatsApp}
+          onOpenWabaChat={handleOpenWabaChat}
+          onOpenCliente={handleOpenClienteFromWaba}
+        />
       )}
 
       {showAddLeadModal && (

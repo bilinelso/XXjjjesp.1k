@@ -6,12 +6,22 @@ import { useKanbanColumns } from '../hooks/useKanbanColumns';
 
 type BulkSendResult = { successCount: number; total: number };
 
+export type BulkUpdateResult = {
+  updated: number;
+  failed: number;
+  total: number;
+  errors: string[];
+};
+
 type BulkEditModalProps = {
   selectedClientes: Cliente[];
   /** Assessores cadastrados — o campo é seleção única, não texto livre. */
   assessores: { id: string; nome: string }[];
   onClose: () => void;
-  onBulkUpdate: (updates: Partial<Cliente>) => Promise<void>;
+  onBulkUpdate: (
+    updates: Partial<Cliente>,
+    onProgress?: (done: number, total: number) => void
+  ) => Promise<BulkUpdateResult>;
   onBulkSendPostback: () => Promise<BulkSendResult>;
   onBulkSendGclid: () => Promise<BulkSendResult>;
 };
@@ -44,6 +54,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   const [sendingGclid, setSendingGclid] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const hasPostbackClientes = selectedClientes.some(
     c => c.lead?.click_id && !c.postback_enviado
@@ -71,11 +82,26 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
     }
 
     setSaving(true);
+    setProgress({ done: 0, total: selectedClientes.length });
     try {
-      await onBulkUpdate(updates);
-      onClose();
+      const result = await onBulkUpdate(updates, (done, total) => setProgress({ done, total }));
+
+      // Números reais vindos do banco — não fecha o modal em caso de falha,
+      // para o relatório ficar visível.
+      if (result.failed === 0) {
+        onClose();
+        return;
+      }
+      setFeedback({
+        type: 'error',
+        title: `${result.updated} de ${result.total} atualizados`,
+        message:
+          `${result.failed} não foram alterados.` +
+          (result.errors.length > 0 ? ` Erro: ${result.errors[0]}` : ''),
+      });
     } finally {
       setSaving(false);
+      setProgress(null);
     }
   };
 
@@ -234,7 +260,9 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                     {saving ? (
                       <>
                         <LoadingSpinner size="sm" color="white" />
-                        Salvando...
+                        {progress
+                          ? `Salvando ${progress.done} de ${progress.total}...`
+                          : 'Salvando...'}
                       </>
                     ) : (
                       <>
@@ -244,6 +272,15 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                     )}
                   </button>
                 </div>
+
+                {saving && progress && progress.total > 0 && (
+                  <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 transition-[width] duration-200"
+                      style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 

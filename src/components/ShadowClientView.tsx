@@ -611,9 +611,9 @@ export const ShadowClientView: React.FC = () => {
             </button>
           ))}
         </div>
-        <div className="overflow-x-auto">
+        <div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
               <tr>
                 <th className="text-left px-6 py-3 font-semibold text-slate-600">Remetente</th>
                 <th className="text-left px-6 py-3 font-semibold text-slate-600">Tipo</th>
@@ -708,9 +708,9 @@ export const ShadowClientView: React.FC = () => {
             <RefreshCw size={16} className={loadingLog ? 'animate-spin' : ''} />
           </button>
         </div>
-        <div className="overflow-x-auto">
+        <div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
               <tr>
                 <th className="text-left px-6 py-3 font-semibold text-slate-600">Data/hora</th>
                 <th className="text-left px-6 py-3 font-semibold text-slate-600">Número</th>

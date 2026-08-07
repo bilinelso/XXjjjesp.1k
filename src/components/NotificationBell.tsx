@@ -15,9 +15,10 @@ interface RecipientEntry {
 interface NotificationBellProps {
   onOpenWhatsApp?: (phone: string) => void;
   onOpenWabaChat?: (chatId: string) => void;
+  onOpenCliente?: (clienteId: string) => void;
 }
 
-export function NotificationBell({ onOpenWhatsApp, onOpenWabaChat }: NotificationBellProps) {
+export function NotificationBell({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: NotificationBellProps) {
   const { user, profile } = useAuth();
   const { notifyAnnouncement } = useNotifications();
   const [open, setOpen] = useState(false);
@@ -281,6 +282,7 @@ export function NotificationBell({ onOpenWhatsApp, onOpenWabaChat }: Notificatio
           onClose={() => setSelectedNotification(null)}
           onOpenWhatsApp={onOpenWhatsApp}
           onOpenWabaChat={onOpenWabaChat}
+          onOpenCliente={onOpenCliente}
         />
       )}
     </>

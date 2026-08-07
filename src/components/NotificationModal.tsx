@@ -30,6 +30,7 @@ interface NotificationModalProps {
   onClose: () => void;
   onOpenWhatsApp?: (phone: string) => void;
   onOpenWabaChat?: (chatId: string) => void;
+  onOpenCliente?: (clienteId: string) => void;
 }
 
 export function NotificationModal({
@@ -37,6 +38,7 @@ export function NotificationModal({
   onClose,
   onOpenWhatsApp,
   onOpenWabaChat,
+  onOpenCliente,
 }: NotificationModalProps) {
   const lead = tryParseLeadAssigned(notification.message);
 
@@ -59,7 +61,19 @@ export function NotificationModal({
               <div className="flex items-center gap-2 text-slate-700">
                 <User size={16} className="text-slate-500 flex-shrink-0" />
                 <span className="text-sm">
-                  O cliente <span className="font-semibold">{lead.nome || '—'}</span> foi atribuído a você.
+                  O cliente{' '}
+                  {/* Sem `cliente_id` (payload antigo) não há ficha a abrir. */}
+                  {lead.cliente_id && onOpenCliente ? (
+                    <button
+                      onClick={() => { onClose(); onOpenCliente(lead.cliente_id!); }}
+                      className="font-semibold text-[#0C447C] hover:underline"
+                    >
+                      {lead.nome || '—'}
+                    </button>
+                  ) : (
+                    <span className="font-semibold">{lead.nome || '—'}</span>
+                  )}{' '}
+                  foi atribuído a você.
                 </span>
               </div>
               {/* Sem `cliente_id` (payload antigo ou malformado) não dá para

@@ -349,7 +349,7 @@ export function UserManagement() {
 
       <div className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
         <table className="w-full">
-          <thead className="bg-slate-50 border-b border-slate-200">
+          <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
             <tr>
               <th className="text-left px-6 py-4 text-sm font-semibold text-slate-700">Usuário</th>
               <th className="text-left px-6 py-4 text-sm font-semibold text-slate-700">Tipo</th>

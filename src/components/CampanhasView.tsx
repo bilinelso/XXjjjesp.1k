@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { BarChart2, Search, ChevronUp, ChevronDown, ChevronsUpDown, Eye, EyeOff } from 'lucide-react';
 import { Pagination } from './Pagination';
 import { supabase } from '../lib/supabase';
@@ -441,9 +441,9 @@ export function CampanhasView({ clientes, onSelectCliente, onRefreshClientes }: 
             <div className="w-6 h-6 border-2 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div>
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
+              <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
                 <tr>
                   <SortTh col="nome"          label="Nome"          sort={clienteSort} onSort={onClienteSort} />
                   <StaticTh label="Email" />
@@ -523,9 +523,9 @@ export function CampanhasView({ clientes, onSelectCliente, onRefreshClientes }: 
         <div className="px-6 py-4 border-b border-slate-100">
           <h3 className="text-sm font-semibold text-slate-800">Resumo por Campanha</h3>
         </div>
-        <div className="overflow-x-auto">
+        <div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
               <tr>
                 <StaticTh label="ID Campanha" />
                 <SortTh col="campanhaLabel"      label="Nome da Campanha"  sort={summarySort} onSort={onSummarySort} />

@@ -143,9 +143,9 @@ export function CampanhaMatchingConfig() {
       {loading ? (
         <div className="flex justify-center py-8"><Loader2 className="animate-spin text-slate-400" size={20} /></div>
       ) : (
-        <div className="overflow-x-auto">
+        <div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="sticky top-0 z-20 bg-slate-50 [&>tr>th]:bg-slate-50 [&>tr>th]:border-b [&>tr>th]:border-slate-200">
               <tr>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600">Nome no Google Ads</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-slate-600">ID da Campanha</th>

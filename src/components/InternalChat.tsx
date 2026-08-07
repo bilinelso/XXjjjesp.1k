@@ -50,9 +50,10 @@ function getAvatarColor(userId: string): string {
 interface InternalChatProps {
   onOpenWhatsApp?: (phone: string) => void;
   onOpenWabaChat?: (chatId: string) => void;
+  onOpenCliente?: (clienteId: string) => void;
 }
 
-export function InternalChat({ onOpenWhatsApp, onOpenWabaChat }: InternalChatProps) {
+export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: InternalChatProps) {
   const { user, profile } = useAuth();
   const { notifyChat } = useNotifications();
   const [open, setOpen] = useState(false);
@@ -356,7 +357,17 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat }: InternalChatPro
         return (
           <div className="flex flex-col gap-0.5">
             <span className="font-semibold text-sm">📋 Novo lead atribuído</span>
-            <span className="text-sm">{parsed.nome}</span>
+            {/* Sem `cliente_id` (mensagem antiga) não há ficha a abrir. */}
+            {parsed.cliente_id && onOpenCliente ? (
+              <button
+                onClick={() => onOpenCliente(parsed.cliente_id)}
+                className="text-left text-sm font-medium underline opacity-90 hover:opacity-100 transition-opacity"
+              >
+                {parsed.nome}
+              </button>
+            ) : (
+              <span className="text-sm">{parsed.nome}</span>
+            )}
             {/* Sem `cliente_id` (mensagem gravada antes do campo existir) não
                 dá para resolver a conversa oficial — mantém o botão direto. */}
             {parsed.telefone && onOpenWhatsApp && parsed.cliente_id && onOpenWabaChat ? (

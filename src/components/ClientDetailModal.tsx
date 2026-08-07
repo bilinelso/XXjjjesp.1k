@@ -12,6 +12,7 @@ import { LoadingOverlay, LoadingSpinner } from './LoadingSpinner';
 import { capitalizeName } from '../utils/formatters';
 import { DepositoHistoricoModal } from './DepositoHistoricoModal';
 import { WabaClientHistory } from './waba/WabaClientHistory';
+import { WabaClientAtendimentos } from './waba/WabaClientAtendimentos';
 import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { MD_QUERY } from '../lib/viewRouting';
@@ -823,6 +824,11 @@ export const ClientDetailModal: React.FC<ClientDetailModalProps> = ({
                 <p className="text-gray-500 text-sm">Nenhuma interação registrada</p>
               )}
             </div>
+
+            <WabaClientAtendimentos
+              clienteId={cliente.id}
+              onOpenChat={onOpenWabaChat ? chatId => { onClose(); onOpenWabaChat(chatId); } : undefined}
+            />
 
             <WabaClientHistory clienteId={cliente.id} />
 
