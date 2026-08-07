@@ -525,9 +525,9 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
         if (!c.assessor || !c.assessor.toLowerCase().includes(assessorNome.toLowerCase())) return false;
       }
       if (filterDateFrom || filterDateTo) {
-        const dc = (c as Cliente & { data_compra?: string }).data_compra;
-        if (!dc) return false;
-        const date = dc.slice(0, 10);
+        const da = c.data_atribuicao;
+        if (!da) return false;
+        const date = da.slice(0, 10);
         if (filterDateFrom && date < filterDateFrom) return false;
         if (filterDateTo && date > filterDateTo) return false;
       }
@@ -804,9 +804,9 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
           </select>
         </div>
 
-        {/* Linha 2: filtro por data de compra */}
+        {/* Linha 2: filtro por data de atribuição ao assessor */}
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Data compra:</span>
+          <span className="text-xs text-slate-500 font-medium whitespace-nowrap">Data atribuição:</span>
           <div className="flex items-center gap-1">
             {(['1D', '1S', '1M', 'todos'] as const).map(p => (
               <button

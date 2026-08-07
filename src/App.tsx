@@ -3218,8 +3218,9 @@ function AppContent() {
         </div>
       )}
 
+      {/* Mensageiro é edge-to-edge: o WhatsAppView controla o próprio layout. */}
       {canAccess('whatsapp') && (
-        <div style={{ display: view === 'whatsapp' ? 'block' : 'none' }} className="max-w-[1600px] mx-auto px-4">
+        <div style={{ display: view === 'whatsapp' ? 'block' : 'none' }}>
           <WhatsAppView
             targetPhone={whatsappTargetPhone}
             onTargetPhoneHandled={() => setWhatsappTargetPhone(null)}
@@ -3229,7 +3230,8 @@ function AppContent() {
       )}
 
       {/* Módulo WABA (WhatsApp oficial) — sempre montado para manter a contagem de não lidas. */}
-      <div style={{ display: view === 'waba' ? 'block' : 'none' }} className="max-w-[1600px] mx-auto px-0 lg:px-4">
+      {/* Mensageiro é edge-to-edge: o WabaView controla o próprio layout. */}
+      <div style={{ display: view === 'waba' ? 'block' : 'none' }}>
         <WabaView
           onUnreadCountChange={setWabaUnread}
           onOpenCliente={handleOpenClienteFromWaba}

@@ -15,6 +15,8 @@ export type Cliente = {
   email?: string;
   telefone?: string;
   data_compra: string;
+  /** Quando o cliente foi atribuído ao assessor atual — vem da crm-api. */
+  data_atribuicao?: string | null;
   valor_produto: number;
   status: 'comprou' | 'conta-criada' | 'depositou' | 'acompanhamento' | 'problema' | 'finalizado' | 'inativo';
   assessor?: string;

@@ -655,7 +655,10 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
                     <Edit2 size={16} />
                     Editar Informações
                   </button>
-                  {cliente.lead && (
+                  {/* Detalhes do lead e envio de conversão são operação de
+                      marketing, não de atendimento — ficam fora do painel
+                      lateral do WABA. */}
+                  {!compact && cliente.lead && (
                     <button
                       onClick={() => setShowLeadDetailsModal(true)}
                       className="border-2 border-blue-500 text-blue-600 px-3 py-2 rounded flex items-center gap-2 hover:bg-blue-50 transition-colors"
@@ -667,7 +670,7 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
                   )}
                   {/* Clientes sem lead vinculado não têm o card de conversão no modal de
                       detalhes; expõe o envio (Enhanced Conversions) aqui fora. */}
-                  {temCompra && !cliente.lead && (
+                  {!compact && temCompra && !cliente.lead && (
                     <button
                       onClick={handleGclidSend}
                       disabled={sendingGclid || cliente.gclid_enviado}
@@ -838,7 +841,9 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
               onOpenChat={onOpenWabaChat ? chatId => { onClose?.(); onOpenWabaChat(chatId); } : undefined}
             />
 
-            <WabaClientHistory clienteId={cliente.id} />
+            {/* No painel lateral do WABA a conversa completa já está na coluna
+                do meio — o preview seria redundante. */}
+            {!compact && <WabaClientHistory clienteId={cliente.id} />}
 
             <div className="border-t pt-4">
               <h3 className="font-bold mb-3">Novo registro</h3>
@@ -1028,7 +1033,7 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
         </div>
       )}
 
-      {showLeadDetailsModal && cliente.lead && (
+      {!compact && showLeadDetailsModal && cliente.lead && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[60]">
           <div className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-xl">
             <div className="flex justify-between items-start mb-6">
