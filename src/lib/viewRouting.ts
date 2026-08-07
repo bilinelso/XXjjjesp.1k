@@ -54,6 +54,8 @@ export const MOBILE_VIEWS: ViewType[] = ['waba', 'leads'];
 export const LG_QUERY = '(min-width: 1024px)';
 /** Tailwind `md`. Abaixo disso o WabaView vira coluna única. */
 export const MD_QUERY = '(min-width: 768px)';
+/** Tailwind `xl`. A partir disso o WabaView pode exibir painel lateral. */
+export const XL_QUERY = '(min-width: 1280px)';
 
 export function isViewType(value: string | null | undefined): value is ViewType {
   return !!value && (ALL_VIEWS as string[]).includes(value);

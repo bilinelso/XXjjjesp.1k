@@ -381,7 +381,7 @@ export function WhatsAppView({ targetPhone, onTargetPhoneHandled, onUnreadCountC
   const isOffline = connectionState !== 'open';
 
   return (
-    <div className="h-[calc(100vh-180px)] flex flex-col">
+    <div className="h-[calc(100dvh-76px)] flex flex-col">
       <div className="flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200 flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className={`w-2.5 h-2.5 rounded-full ${

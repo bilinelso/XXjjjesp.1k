@@ -377,5 +377,6 @@ export interface WabaTemplate {
 
 /** Chat com o contato (e cliente vinculado) embutidos pelo PostgREST. */
 export interface WabaChatWithContact extends WabaChat {
-  waba_contacts: (WabaContact & { clientes: { id: string; nome: string } | null }) | null;
+  // `status` alimenta o badge do Kanban na lista de conversas.
+  waba_contacts: (WabaContact & { clientes: { id: string; nome: string; status: string } | null }) | null;
 }

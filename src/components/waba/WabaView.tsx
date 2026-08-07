@@ -4,7 +4,8 @@ import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../contexts/AuthContext';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useNotifications } from '../../hooks/useNotifications';
-import { MD_QUERY } from '../../lib/viewRouting';
+import { MD_QUERY, XL_QUERY } from '../../lib/viewRouting';
+import type { Cliente } from '../../lib/api';
 import { wabaApi } from '../../lib/wabaApi';
 import type {
   WabaAtendimento,
@@ -33,8 +34,11 @@ import { WabaAttachMenu } from './WabaAttachMenu';
 import { WabaMediaSendPreview } from './WabaMediaSendPreview';
 import { fileToBase64, imageFileToJpeg } from './wabaUtils';
 import type { WabaMediaKind } from '../../lib/wabaApi';
+import { ClientDetailPanel } from '../ClientDetailPanel';
+import { KanbanStatusBadge } from '../whatsapp/KanbanStatusBadge';
+import { useKanbanColumns } from '../../hooks/useKanbanColumns';
 
-const CHAT_SELECT = '*, waba_contacts(*, clientes(id, nome))';
+const CHAT_SELECT = '*, waba_contacts(*, clientes(id, nome, status))';
 
 type WabaViewProps = {
   onUnreadCountChange?: (count: number) => void;
@@ -238,8 +242,11 @@ export const WabaView: React.FC<WabaViewProps> = ({
 }) => {
   const { user, profile } = useAuth();
   const { notifyWhatsApp } = useNotifications();
+  // Rótulo do badge de status — segue o display_name das colunas do Kanban.
+  const { getDisplayName } = useKanbanColumns();
   // Abaixo de `md` o módulo vira coluna única: ou a lista, ou a conversa.
   const isMobile = !useMediaQuery(MD_QUERY);
+  const isWide = useMediaQuery(XL_QUERY);
   // Sincronizar template é configuração, não atendimento.
   const isMaster = !!profile?.is_master;
 
@@ -268,6 +275,8 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const [openAtendimentos, setOpenAtendimentos] = useState<Set<string>>(new Set());
   /** Atendimentos da conversa aberta, por `aberto_em` asc — fronteiras do divisor. */
   const [chatAtendimentos, setChatAtendimentos] = useState<WabaAtendimento[]>([]);
+  const [panelCliente, setPanelCliente] = useState<Cliente | null>(null);
+  const [loadingPanelCliente, setLoadingPanelCliente] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
   // A janela de 24h pode virar com a tela aberta — este relógio força o recálculo.
   const [now, setNow] = useState(() => Date.now());
@@ -359,6 +368,18 @@ export const WabaView: React.FC<WabaViewProps> = ({
       setMessages((data || []) as WabaMessage[]);
     }
     setLoadingMessages(false);
+  }, []);
+
+  const loadPanelCliente = useCallback(async (clienteId: string) => {
+    setLoadingPanelCliente(true);
+    const { data } = await supabase
+      .from('clientes')
+      .select('*')
+      .eq('id', clienteId)
+      .maybeSingle();
+
+    setPanelCliente((data as Cliente | null) || null);
+    setLoadingPanelCliente(false);
   }, []);
 
   /** Quando a Meta foi espelhada pela última vez — vale para qualquer status. */
@@ -526,6 +547,17 @@ export const WabaView: React.FC<WabaViewProps> = ({
     () => chats.find(chat => chat.id === selectedChatId) || null,
     [chats, selectedChatId]
   );
+
+  useEffect(() => {
+    const clienteId = selectedChat?.waba_contacts?.cliente_id;
+    if (!isWide || !clienteId) {
+      setPanelCliente(null);
+      setLoadingPanelCliente(false);
+      return;
+    }
+
+    loadPanelCliente(clienteId);
+  }, [selectedChat?.waba_contacts?.cliente_id, isWide, loadPanelCliente]);
 
   const windowState = useMemo(
     () => computeWindow(selectedChat?.waba_contacts?.last_inbound_at, now),
@@ -1016,6 +1048,16 @@ export const WabaView: React.FC<WabaViewProps> = ({
     return null;
   };
 
+  const handlePanelClienteUpdate = async (id: string, updates: Partial<Cliente>) => {
+    await supabase.from('clientes').update(updates).eq('id', id);
+    setPanelCliente(prev => (prev?.id === id ? { ...prev, ...updates } : prev));
+    await Promise.all([loadPanelCliente(id), loadChats()]);
+  };
+
+  const handlePanelClienteStatusChange = async (id: string, status: string) => {
+    await handlePanelClienteUpdate(id, { status: status as Cliente['status'] });
+  };
+
   /** Cresce até ~5 linhas; depois disso o scroll é interno. */
   const autoGrowTextarea = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto';
@@ -1035,6 +1077,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
   // com `hidden`) para não manter as duas colunas montadas à toa.
   const showList = !isMobile || selectedChatId === null;
   const showConversation = !isMobile || selectedChatId !== null;
+  const showClientPanel = isWide && !!selectedChat?.waba_contacts?.cliente_id;
 
   // Mesmo botão no cabeçalho do módulo e no aviso do modo template — os dois
   // compartilham o estado de `syncing`, então nunca divergem.
@@ -1073,7 +1116,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
   return (
     // 100dvh porque no iOS o 100vh ignora a barra do Safari e esconde o composer.
     // Mobile desconta só a barra superior; no desktop o espaçamento é o de antes.
-    <div className="h-[calc(100dvh-52px)] lg:h-[calc(100dvh-180px)] flex flex-col">
+    <div className="h-[calc(100dvh-52px)] lg:h-[calc(100dvh-76px)] flex flex-col">
       {showList && (
         <>
           <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-slate-200 flex-shrink-0">
@@ -1147,6 +1190,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
                 const chatWindow = computeWindow(chat.waba_contacts?.last_inbound_at, now);
                 const unread = chat.unread_count || 0;
                 const emAtendimento = openAtendimentos.has(chat.id);
+                const clienteStatus = chat.waba_contacts?.clientes?.status;
                 return (
                   <button
                     key={chat.id}
@@ -1187,6 +1231,14 @@ export const WabaView: React.FC<WabaViewProps> = ({
                         />
                       ) : null}
                     </div>
+                    {/* Mesmo `pl-4` do preview, para alinhar com o texto e não
+                        com a bolinha da janela de 24h. Sem cliente vinculado
+                        nada é renderizado — nem a linha. */}
+                    {clienteStatus && (
+                      <div className="mt-1 pl-4">
+                        <KanbanStatusBadge status={clienteStatus} label={getDisplayName(clienteStatus)} />
+                      </div>
+                    )}
                   </button>
                 );
               })
@@ -1339,7 +1391,9 @@ export const WabaView: React.FC<WabaViewProps> = ({
                       </span>
                     )}
 
-                    {selectedChat.waba_contacts?.cliente_id && onOpenCliente && (
+                    {/* Com o painel lateral aberto a ficha já está na tela — o
+                        link só abriria um modal redundante por cima dela. */}
+                    {!showClientPanel && selectedChat.waba_contacts?.cliente_id && onOpenCliente && (
                       <button
                         onClick={() => onOpenCliente(selectedChat.waba_contacts!.cliente_id!)}
                         className="flex items-center gap-1 text-xs text-[#0C447C] hover:underline"
@@ -1565,6 +1619,34 @@ export const WabaView: React.FC<WabaViewProps> = ({
             </>
           )}
         </div>
+        )}
+
+        {/* Ficha do cliente — terceira coluna, só no desktop largo (≥1280px) e
+            quando o contato tem cliente vinculado. Nas telas menores a ficha
+            continua abrindo como modal via `onOpenCliente`. */}
+        {showClientPanel && (
+          <div className="w-[340px] 2xl:w-[380px] flex-shrink-0 border-l border-slate-200 flex flex-col min-h-0 overflow-hidden">
+            {panelCliente ? (
+              <ClientDetailPanel
+                // Remonta ao trocar de cliente: sem isto o estado interno
+                // (edição, paginação de interações) viria do chat anterior.
+                key={panelCliente.id}
+                cliente={panelCliente}
+                compact
+                onUpdate={handlePanelClienteUpdate}
+                onStatusChange={handlePanelClienteStatusChange}
+                onOpenWhatsApp={undefined}
+                onOpenWabaChat={selectChat}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
+                <User size={28} className="text-slate-300 mb-2" />
+                <p className="text-sm text-slate-500">
+                  {loadingPanelCliente ? 'Carregando ficha...' : 'Nenhum cliente vinculado a este número'}
+                </p>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { MessageCircle, X, Send, ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
@@ -79,6 +79,10 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: 
   const [unreadByUser, setUnreadByUser] = useState<Map<string, number>>(new Map());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  // Identifica a conversa já posicionada no fim; enquanto for a mesma, novas
+  // mensagens rolam com animação. Ao mudar (ou reabrir), o salto é instantâneo.
+  const scrolledConversationRef = useRef<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // ── Load users ──────────────────────────────────────────────────────────────
@@ -148,9 +152,11 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: 
       .from('internal_messages')
       .select('*')
       .is('recipient_id', null)
-      .order('created_at', { ascending: true })
+      // Descendente + limit pega as 100 MAIS RECENTES; reverte para exibir em
+      // ordem cronológica crescente.
+      .order('created_at', { ascending: false })
       .limit(100);
-    if (data) setGeneralMessages(data);
+    if (data) setGeneralMessages([...data].reverse());
     setLoadingGeneral(false);
   }, [user]);
 
@@ -214,9 +220,11 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: 
       .or(
         `and(sender_id.eq.${user.id},recipient_id.eq.${otherId}),and(sender_id.eq.${otherId},recipient_id.eq.${user.id})`
       )
-      .order('created_at', { ascending: true })
+      // Descendente + limit pega as 100 MAIS RECENTES; reverte para exibir em
+      // ordem cronológica crescente.
+      .order('created_at', { ascending: false })
       .limit(100);
-    if (data) setPrivateMessages(data);
+    if (data) setPrivateMessages([...data].reverse());
     setLoadingPrivate(false);
   }, [user]);
 
@@ -265,9 +273,35 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: 
   }, [open, tab, selectedUser, privateMessages, markAsRead]);
 
   // ── Auto-scroll ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [generalMessages, privateMessages, selectedUser]);
+  // Ajusta o scrollTop do container (e não scrollIntoView na âncora): dentro de
+  // um popup `fixed`, o scrollIntoView pode arrastar a página inteira no mobile.
+  const isLoadingCurrent = tab === 'general' ? loadingGeneral : loadingPrivate;
+  const currentCount = tab === 'general' ? generalMessages.length : privateMessages.length;
+  const conversationKey = tab === 'general' ? 'general' : `private:${selectedUser?.id ?? ''}`;
+  const canShowMessages = tab === 'general' || (tab === 'private' && !!selectedUser);
+
+  useLayoutEffect(() => {
+    // Painel fechado / lista não montada: descarta o posicionamento anterior
+    // para que a próxima abertura salte de novo para o fim.
+    if (!open || !canShowMessages) {
+      scrolledConversationRef.current = null;
+      return;
+    }
+    // Enquanto carrega, o container está vazio — posicionar agora seria perdido.
+    if (isLoadingCurrent) return;
+
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const isFirstPositioning = scrolledConversationRef.current !== conversationKey;
+    scrolledConversationRef.current = conversationKey;
+
+    if (isFirstPositioning) {
+      container.scrollTop = container.scrollHeight;
+    } else {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    }
+  }, [open, canShowMessages, isLoadingCurrent, conversationKey, currentCount]);
 
   // ── Send ─────────────────────────────────────────────────────────────────────
   const handleSend = async () => {
@@ -347,8 +381,8 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: 
   if (!user) return null;
 
   const currentMessages = tab === 'general' ? generalMessages : privateMessages;
-  const loading = tab === 'general' ? loadingGeneral : loadingPrivate;
-  const showMessages = tab === 'general' || (tab === 'private' && !!selectedUser);
+  const loading = isLoadingCurrent;
+  const showMessages = canShowMessages;
 
   const renderMessageContent = (message: string) => {
     try {
@@ -484,7 +518,7 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: 
           {/* Messages */}
           {showMessages && (
             <>
-              <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-slate-50">
+              <div ref={messagesContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-slate-50">
                 {loading ? (
                   <div className="flex justify-center py-10">
                     <Loader2 className="animate-spin text-blue-500" size={24} />
