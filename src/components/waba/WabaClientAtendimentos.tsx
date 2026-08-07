@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Headset, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Headset, ChevronRight, ChevronLeft, RotateCcw } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { atendimentoMotivoLabel, type WabaAtendimento } from '../../lib/wabaApi';
 import { formatMessageTime } from './wabaUtils';
@@ -66,6 +66,7 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
   const atendimento = sorted[currentPage];
   const emAndamento = !atendimento.fechado_em;
   const clickable = !!onOpenChat;
+  const reaberturas = atendimento.reaberturas ?? 0;
 
   const content = (
     <>
@@ -78,6 +79,14 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
             ? 'Em andamento'
             : `${atendimentoMotivoLabel(atendimento.fechado_motivo)} · ${formatMessageTime(atendimento.fechado_em)}`}
         </p>
+        {/* Sem reabertura, a linha fica exatamente como era. */}
+        {reaberturas > 0 && (
+          <p className="text-xs text-amber-700 mt-0.5 flex items-center gap-1">
+            <RotateCcw size={12} className="flex-shrink-0" />
+            Reaberto {reaberturas}{reaberturas === 1 ? ' vez' : ' vezes'} — o cliente voltou
+            depois de finalizado
+          </p>
+        )}
       </div>
       {emAndamento && (
         <span className="flex-shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold">
