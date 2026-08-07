@@ -307,6 +307,12 @@ export interface WabaAtendimento {
   fechado_em: string | null;
   fechado_por: string | null;
   fechado_motivo: WabaAtendimentoMotivo | null;
+  /**
+   * Quantas vezes o ciclo foi finalizado e o cliente voltou dentro de 1h. O
+   * banco reabre o registro (limpa os campos de fechamento) em vez de criar um
+   * novo, então uma reabertura não vira linha nova no histórico.
+   */
+  reaberturas: number;
 }
 
 export const ATENDIMENTO_MOTIVO_LABEL: Record<WabaAtendimentoMotivo, string> = {

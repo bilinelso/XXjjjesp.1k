@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Headset, ChevronRight } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Headset, ChevronRight, ChevronLeft } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { atendimentoMotivoLabel, type WabaAtendimento } from '../../lib/wabaApi';
 import { formatMessageTime } from './wabaUtils';
@@ -23,10 +23,13 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
 }) => {
   const [atendimentos, setAtendimentos] = useState<WabaAtendimento[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Um atendimento por página, igual ao "Registro de interações". */
+  const [page, setPage] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setPage(0); // trocar de cliente sempre abre na primeira página
 
     supabase
       .from('waba_atendimentos')
@@ -42,8 +45,52 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
     return () => { cancelled = true; };
   }, [clienteId]);
 
+  /**
+   * O atendimento em aberto vem sempre primeiro — é a informação mais
+   * importante da seção e não pode cair para uma página do meio conforme o
+   * histórico cresce. Os demais seguem do mais recente ao mais antigo.
+   */
+  const sorted = useMemo(() => {
+    return [...atendimentos].sort((a, b) => {
+      const abertoA = a.fechado_em ? 1 : 0;
+      const abertoB = b.fechado_em ? 1 : 0;
+      if (abertoA !== abertoB) return abertoA - abertoB;
+      return new Date(b.aberto_em).getTime() - new Date(a.aberto_em).getTime();
+    });
+  }, [atendimentos]);
+
   // Sem atendimentos (ou ainda carregando) a seção não ocupa espaço na ficha.
-  if (loading || atendimentos.length === 0) return null;
+  if (loading || sorted.length === 0) return null;
+
+  const currentPage = Math.min(page, sorted.length - 1);
+  const atendimento = sorted[currentPage];
+  const emAndamento = !atendimento.fechado_em;
+  const clickable = !!onOpenChat;
+
+  const content = (
+    <>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-slate-700">
+          Aberto em {formatMessageTime(atendimento.aberto_em)}
+        </p>
+        <p className="text-xs text-slate-500 mt-0.5">
+          {emAndamento
+            ? 'Em andamento'
+            : `${atendimentoMotivoLabel(atendimento.fechado_motivo)} · ${formatMessageTime(atendimento.fechado_em)}`}
+        </p>
+      </div>
+      {emAndamento && (
+        <span className="flex-shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold">
+          Em andamento
+        </span>
+      )}
+      {clickable && <ChevronRight size={16} className="text-slate-400 flex-shrink-0" />}
+    </>
+  );
+
+  const boxClass = `w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg border ${
+    emAndamento ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white'
+  }`;
 
   return (
     <div className="mb-6">
@@ -52,50 +99,40 @@ export const WabaClientAtendimentos: React.FC<WabaClientAtendimentosProps> = ({
         Atendimentos (WABA)
       </h3>
 
-      <div className="space-y-2">
-        {atendimentos.map(atendimento => {
-          const emAndamento = !atendimento.fechado_em;
-          const clickable = !!onOpenChat;
+      <div>
+        {clickable ? (
+          <button
+            onClick={() => onOpenChat!(atendimento.chat_id)}
+            className={`${boxClass} min-h-[44px] hover:bg-slate-50 transition-colors`}
+          >
+            {content}
+          </button>
+        ) : (
+          <div className={boxClass}>{content}</div>
+        )}
 
-          const content = (
-            <>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-slate-700">
-                  Aberto em {formatMessageTime(atendimento.aberto_em)}
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {emAndamento
-                    ? 'Em andamento'
-                    : `${atendimentoMotivoLabel(atendimento.fechado_motivo)} · ${formatMessageTime(atendimento.fechado_em)}`}
-                </p>
-              </div>
-              {emAndamento && (
-                <span className="flex-shrink-0 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold">
-                  Em andamento
-                </span>
-              )}
-              {clickable && <ChevronRight size={16} className="text-slate-400 flex-shrink-0" />}
-            </>
-          );
-
-          const boxClass = `w-full flex items-center gap-3 text-left px-3 py-2.5 rounded-lg border ${
-            emAndamento ? 'border-emerald-300 bg-emerald-50/50' : 'border-slate-200 bg-white'
-          }`;
-
-          return clickable ? (
+        {/* Navegação — mesmo componente e comportamento do "Registro de interações" */}
+        {sorted.length > 1 && (
+          <div className="flex items-center justify-between mt-2">
             <button
-              key={atendimento.id}
-              onClick={() => onOpenChat!(atendimento.chat_id)}
-              className={`${boxClass} min-h-[44px] hover:bg-slate-50 transition-colors`}
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={currentPage === 0}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-600 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {content}
+              <ChevronLeft size={13} /> Mais recente
             </button>
-          ) : (
-            <div key={atendimento.id} className={boxClass}>
-              {content}
-            </div>
-          );
-        })}
+            <span className="text-xs text-slate-400">
+              {currentPage + 1} / {sorted.length}
+            </span>
+            <button
+              onClick={() => setPage(p => Math.min(sorted.length - 1, p + 1))}
+              disabled={currentPage === sorted.length - 1}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-600 border border-slate-200 rounded hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Mais antigo <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
