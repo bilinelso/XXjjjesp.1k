@@ -6,11 +6,13 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { MD_QUERY } from '../../lib/viewRouting';
 import { wabaApi } from '../../lib/wabaApi';
 import type {
+  WabaAtendimento,
   WabaChatWithContact,
   WabaMessage,
   WabaSendResult,
   WabaTemplate,
 } from '../../lib/wabaApi';
+import { atendimentoMotivoLabel } from '../../lib/wabaApi';
 import { WabaTemplatePicker } from './WabaTemplatePicker';
 import {
   computeWindow,
@@ -243,6 +245,11 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const [syncFeedback, setSyncFeedback] = useState<Feedback>(null);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [lastSyncLoaded, setLastSyncLoaded] = useState(false);
+  /** chat_id dos atendimentos em aberto — alimenta o indicador vermelho. */
+  const [openAtendimentos, setOpenAtendimentos] = useState<Set<string>>(new Set());
+  /** Atendimentos da conversa aberta, por `aberto_em` asc — fronteiras do divisor. */
+  const [chatAtendimentos, setChatAtendimentos] = useState<WabaAtendimento[]>([]);
+  const [finalizando, setFinalizando] = useState(false);
   // A janela de 24h pode virar com a tela aberta — este relógio força o recálculo.
   const [now, setNow] = useState(() => Date.now());
 
@@ -298,6 +305,19 @@ export const WabaView: React.FC<WabaViewProps> = ({
     if (!error) setTemplates((data || []) as WabaTemplate[]);
   }, []);
 
+  /** Ciclos de atendimento da conversa, do mais antigo ao mais recente. */
+  const loadChatAtendimentos = useCallback(async (chatId: string) => {
+    const { data, error } = await supabase
+      .from('waba_atendimentos')
+      .select('*')
+      .eq('chat_id', chatId)
+      .order('aberto_em', { ascending: true });
+
+    if (!error && selectedChatIdRef.current === chatId) {
+      setChatAtendimentos((data || []) as WabaAtendimento[]);
+    }
+  }, []);
+
   const loadMessages = useCallback(async (chatId: string) => {
     setLoadingMessages(true);
     const { data, error } = await supabase
@@ -325,12 +345,32 @@ export const WabaView: React.FC<WabaViewProps> = ({
     setLastSyncLoaded(true);
   }, []);
 
+  /** Chats com atendimento em aberto. A RLS já limita ao assessor logado. */
+  const loadOpenAtendimentos = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('waba_atendimentos')
+      .select('chat_id')
+      .is('fechado_em', null);
+
+    if (!error) {
+      setOpenAtendimentos(new Set((data || []).map(row => (row as { chat_id: string }).chat_id)));
+    }
+  }, []);
+
   useEffect(() => {
     if (!user) return;
+
+    // A limpeza da janela de 24h roda uma vez por carregamento — sem polling.
+    // Só depois dela a lista de abertos é lida, senão viriam expirados.
+    (async () => {
+      await wabaApi.fecharAtendimentosExpirados();
+      await loadOpenAtendimentos();
+    })();
+
     loadChats();
     loadTemplates();
     loadLastSyncedAt();
-  }, [user, loadChats, loadTemplates, loadLastSyncedAt]);
+  }, [user, loadChats, loadTemplates, loadLastSyncedAt, loadOpenAtendimentos]);
 
   const handleSyncTemplates = async () => {
     if (syncing) return;
@@ -369,7 +409,12 @@ export const WabaView: React.FC<WabaViewProps> = ({
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'waba_chats' },
-        () => { loadChats(); }
+        () => {
+          loadChats();
+          // Mensagem nova do cliente reabre o atendimento no banco — reler aqui
+          // é o que traz o indicador vermelho de volta sem refresh.
+          loadOpenAtendimentos();
+        }
       )
       .on<WabaMessage>(
         'postgres_changes',
@@ -386,7 +431,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, loadChats]);
+  }, [user, loadChats, loadOpenAtendimentos]);
 
   // ── Derivados ──────────────────────────────────────────────────────────────
 
@@ -477,8 +522,10 @@ export const WabaView: React.FC<WabaViewProps> = ({
     // O recorder remonta com o chat (key) e não consegue avisar — reset manual.
     setVoiceActive(false);
     setPendingAttachment(null);
+    setChatAtendimentos([]);
     loadMessages(chatId);
-  }, [loadMessages]);
+    loadChatAtendimentos(chatId);
+  }, [loadMessages, loadChatAtendimentos]);
 
   const handleSelectChat = (chat: WabaChatWithContact) => selectChat(chat.id);
 
@@ -822,6 +869,35 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const handleVoiceActiveChange = useCallback((active: boolean) => setVoiceActive(active), []);
 
   /**
+   * Finaliza o atendimento aberto da conversa. A UI segue o retorno da RPC:
+   * `false` significa que não havia aberto ou faltou permissão, e nesse caso
+   * nada muda além do aviso.
+   */
+  const handleFinalizarAtendimento = async () => {
+    if (!selectedChat || finalizando) return;
+
+    setFinalizando(true);
+    const ok = await wabaApi.finalizarAtendimento(selectedChat.id);
+
+    if (ok) {
+      await Promise.all([
+        loadOpenAtendimentos(),
+        loadChatAtendimentos(selectedChat.id),
+      ]);
+      setFeedback({ type: 'success', text: 'Atendimento finalizado.' });
+    } else {
+      // Pode ter sido fechado por outra via (troca de assessor, janela) —
+      // recarregar deixa a tela coerente com o banco.
+      await loadOpenAtendimentos();
+      setFeedback({
+        type: 'error',
+        text: 'Não foi possível finalizar: não há atendimento aberto ou você não tem permissão.',
+      });
+    }
+    setFinalizando(false);
+  };
+
+  /**
    * Envio de imagem/documento a partir do preview, agora otimista: preparado o
    * arquivo, o overlay fecha e o balão "enviando" assume. Falha de rede/proxy
    * vira balão `failed` com reenviar — só a falha de PREPARO (conversão/
@@ -990,6 +1066,7 @@ export const WabaView: React.FC<WabaViewProps> = ({
               filteredChats.map(chat => {
                 const chatWindow = computeWindow(chat.waba_contacts?.last_inbound_at, now);
                 const unread = chat.unread_count || 0;
+                const emAtendimento = openAtendimentos.has(chat.id);
                 return (
                   <button
                     key={chat.id}

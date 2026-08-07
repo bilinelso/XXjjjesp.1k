@@ -36,7 +36,7 @@ interface ChatMessage {
 
 interface MeuContato {
   timestamp: string;
-  fonte: 'WhatsApp' | 'ligação';
+  fonte: 'WhatsApp' | 'WABA' | 'ligação';
 }
 
 // Pure helpers (no external deps)
@@ -250,6 +250,8 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
   const [myLigMap, setMyLigMap] = useState<Map<string, string>>(new Map());
   // User's own chats: phone(last10) → { id, ts }
   const [myChatByPhone, setMyChatByPhone] = useState<Map<string, { id: string; ts: string }>>(new Map());
+  // User's own WABA conversations: clienteId → timestamp do último contato
+  const [myWabaMap, setMyWabaMap] = useState<Map<string, string>>(new Map());
 
   // phone → chatId (for preview modal lookup)
   const [chatPhoneMap, setChatPhoneMap] = useState<Map<string, string>>(new Map());
@@ -322,6 +324,49 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
     });
   }, [profile?.id, viewingUserId]);
 
+  /**
+   * Terceira fonte de contato: WhatsApp oficial (WABA).
+   *
+   * A RPC devolve, por cliente, o último envio e o último recebimento. Ela
+   * ignora o parâmetro para quem não é master, então passar `viewingUserId`
+   * (null quando é o próprio usuário) cobre os dois casos.
+   */
+  useEffect(() => {
+    if (!profile?.id) return;
+    let cancelled = false;
+
+    supabase
+      .rpc('waba_ultimo_contato_por_cliente', { p_assessor_user_id: viewingUserId })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          console.error('[Atendimentos] Falha ao carregar contatos do WABA:', error.message);
+          setMyWabaMap(new Map());
+          return;
+        }
+
+        const map = new Map<string, string>();
+        for (const row of (data || []) as {
+          cliente_id: string;
+          ultimo_envio_at: string | null;
+          ultimo_inbound_at: string | null;
+        }[]) {
+          // Só um envio meu conta como atendimento iniciado — template
+          // incluído, que hoje é como toda primeira mensagem sai.
+          if (!row.ultimo_envio_at) continue;
+          // O timestamp exibido é o da última interação, como no módulo QR.
+          const ts =
+            row.ultimo_inbound_at && row.ultimo_inbound_at > row.ultimo_envio_at
+              ? row.ultimo_inbound_at
+              : row.ultimo_envio_at;
+          map.set(row.cliente_id, ts);
+        }
+        setMyWabaMap(map);
+      });
+
+    return () => { cancelled = true; };
+  }, [profile?.id, viewingUserId]);
+
   // Load quick replies once on mount
   useEffect(() => {
     if (!profile?.id) return;
@@ -372,15 +417,24 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
       const chatEntry = variants.map(v => myChatByPhone.get(v.slice(-10))).find(Boolean);
       const chatTs = chatEntry?.ts;
 
-      if (!ligTs && !chatTs) continue;
-      if (!ligTs) { map.set(c.id, { timestamp: chatTs!, fonte: 'WhatsApp' }); continue; }
-      if (!chatTs) { map.set(c.id, { timestamp: ligTs, fonte: 'ligação' }); continue; }
-      map.set(c.id, chatTs >= ligTs
-        ? { timestamp: chatTs, fonte: 'WhatsApp' }
-        : { timestamp: ligTs, fonte: 'ligação' });
+      const wabaTs = myWabaMap.get(c.id);
+
+      // Três fontes concorrendo: vence o timestamp mais recente.
+      const candidatos: MeuContato[] = [];
+      if (chatTs) candidatos.push({ timestamp: chatTs, fonte: 'WhatsApp' });
+      if (wabaTs) candidatos.push({ timestamp: wabaTs, fonte: 'WABA' });
+      if (ligTs) candidatos.push({ timestamp: ligTs, fonte: 'ligação' });
+      if (candidatos.length === 0) continue;
+
+      map.set(
+        c.id,
+        candidatos.reduce((maisRecente, atual) =>
+          atual.timestamp > maisRecente.timestamp ? atual : maisRecente
+        )
+      );
     }
     return map;
-  }, [clientes, myLigMap, myChatByPhone]);
+  }, [clientes, myLigMap, myChatByPhone, myWabaMap]);
 
   // Find chat ID for a client phone using all variants (for preview modal)
   const getChatId = useCallback((telefone: string): string | null => {

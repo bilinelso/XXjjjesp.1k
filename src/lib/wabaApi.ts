@@ -160,6 +160,32 @@ export const wabaApi = {
     return { success: false, error: SYNC_FALLBACK };
   },
 
+  /**
+   * Finaliza o atendimento aberto do chat. Devolve `false` quando não havia
+   * atendimento aberto ou o usuário não tem permissão — a UI reflete o
+   * retorno, nunca assume sucesso.
+   */
+  async finalizarAtendimento(chat_id: string): Promise<boolean> {
+    const { data, error } = await supabase.rpc('waba_finalizar_atendimento', {
+      p_chat_id: chat_id,
+    });
+    if (error) {
+      console.error('[WABA] Falha ao finalizar atendimento:', { chat_id, message: error.message });
+      return false;
+    }
+    return data === true;
+  },
+
+  /** Fecha os atendimentos cuja janela de 24h expirou. Devolve quantos fechou. */
+  async fecharAtendimentosExpirados(): Promise<number> {
+    const { data, error } = await supabase.rpc('waba_fechar_atendimentos_expirados');
+    if (error) {
+      console.error('[WABA] Falha ao fechar atendimentos expirados:', error.message);
+      return 0;
+    }
+    return typeof data === 'number' ? data : 0;
+  },
+
   async openChat(cliente_id: string): Promise<WabaOpenChatResult> {
     const { data, error } = await supabase.rpc('waba_open_chat', { p_cliente_id: cliente_id });
 
@@ -261,6 +287,39 @@ export interface WabaMessage {
   template_name: string | null;
   template_variables: unknown;
   pricing_category: string | null;
+}
+
+// ── Atendimentos ─────────────────────────────────────────────────────────────
+// Um ciclo de atendimento por conversa. Abertura e fechamento por troca de
+// assessor são automáticos no banco — o frontend só lê, finaliza e limpa
+// expirados.
+
+export type WabaAtendimentoMotivo = 'manual' | 'troca_assessor' | 'janela_24h';
+
+export interface WabaAtendimento {
+  id: string;
+  chat_id: string;
+  cliente_id: string | null;
+  assessor_user_id: string;
+  aberto_em: string;
+  ultimo_inbound_em: string | null;
+  /** Null enquanto o atendimento está aberto. */
+  fechado_em: string | null;
+  fechado_por: string | null;
+  fechado_motivo: WabaAtendimentoMotivo | null;
+}
+
+export const ATENDIMENTO_MOTIVO_LABEL: Record<WabaAtendimentoMotivo, string> = {
+  manual: 'Finalizado pelo assessor',
+  troca_assessor: 'Encerrado por troca de assessor',
+  janela_24h: 'Encerrado pela janela de 24h',
+};
+
+export function atendimentoMotivoLabel(motivo: string | null | undefined): string {
+  if (motivo && motivo in ATENDIMENTO_MOTIVO_LABEL) {
+    return ATENDIMENTO_MOTIVO_LABEL[motivo as WabaAtendimentoMotivo];
+  }
+  return 'Atendimento encerrado';
 }
 
 export interface WabaTemplate {
