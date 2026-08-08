@@ -575,7 +575,10 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
     const cls = classifyC(c);
     const myContact = meuUltimoContato.get(c.id);
     const days = daysSince(myContact?.timestamp ?? null);
-    const statusUpdatedAt = (c as Cliente & { status_updated_at?: string }).status_updated_at;
+    // Quando o cliente caiu na mão deste assessor. O `status_updated_at` é o
+    // fallback para as linhas antigas, sem `data_atribuicao` preenchida.
+    const atribuidoEm =
+      c.data_atribuicao ?? (c as Cliente & { status_updated_at?: string }).status_updated_at;
     const isDropdownOpen = openDropdown === c.id;
     const isSending = sendingId === c.id;
     const isSent = sentId === c.id;
@@ -612,7 +615,7 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
 
           {/* Assigned date */}
           <div className="text-xs text-slate-400 flex-shrink-0 text-right min-w-[80px]">
-            {statusUpdatedAt ? `atribuído ${fmtDDMM(statusUpdatedAt)}` : ''}
+            {atribuidoEm ? `atribuído ${fmtDDMM(atribuidoEm)}` : ''}
           </div>
 
           {/* Contact badge */}
@@ -620,8 +623,8 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
             {cls === 'nao_iniciado' || !myContact ? (
               <>
                 <span className="text-xs font-medium text-slate-400">Nunca contatado</span>
-                {statusUpdatedAt && (
-                  <span className="text-[11px] text-slate-400 mt-0.5">há {daysSince(statusUpdatedAt)} dias</span>
+                {atribuidoEm && (
+                  <span className="text-[11px] text-slate-400 mt-0.5">há {daysSince(atribuidoEm)} dias</span>
                 )}
               </>
             ) : (

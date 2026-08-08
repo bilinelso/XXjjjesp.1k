@@ -275,6 +275,8 @@ export const WabaView: React.FC<WabaViewProps> = ({
   const [openAtendimentos, setOpenAtendimentos] = useState<Set<string>>(new Set());
   /** Atendimentos da conversa aberta, por `aberto_em` asc — fronteiras do divisor. */
   const [chatAtendimentos, setChatAtendimentos] = useState<WabaAtendimento[]>([]);
+  /** Nome do assessor logado — resolve a variável `assessor_nome` nos templates. */
+  const [assessorNome, setAssessorNome] = useState<string | null>(null);
   const [panelCliente, setPanelCliente] = useState<Cliente | null>(null);
   const [loadingPanelCliente, setLoadingPanelCliente] = useState(false);
   const [finalizando, setFinalizando] = useState(false);
@@ -319,6 +321,19 @@ export const WabaView: React.FC<WabaViewProps> = ({
     const timer = setInterval(() => setNow(Date.now()), 30000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!profile?.assessor_id) {
+      setAssessorNome(null);
+      return;
+    }
+    supabase
+      .from('assessores')
+      .select('nome')
+      .eq('id', profile.assessor_id)
+      .maybeSingle()
+      .then(({ data }) => setAssessorNome(data?.nome ?? null));
+  }, [profile?.assessor_id]);
 
   // ── Carregamento ───────────────────────────────────────────────────────────
   // Sem filtro por usuário: a RLS já devolve apenas as threads do assessor logado.
@@ -1612,6 +1627,12 @@ export const WabaView: React.FC<WabaViewProps> = ({
                       sending={false}
                       onSend={handleSendTemplate}
                       emptyState={templateEmptyState}
+                      contactName={
+                        selectedChat.waba_contacts?.clientes?.nome ??
+                        selectedChat.waba_contacts?.contact_name ??
+                        null
+                      }
+                      assessorName={assessorNome}
                     />
                   </div>
                 )}
