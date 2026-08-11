@@ -1,12 +1,16 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Search, MessageCircle, ChevronDown, X, ArrowLeft } from 'lucide-react';
+import { Search, MessageCircle, ChevronDown, X, ArrowLeft, AlertCircle } from 'lucide-react';
 import { DatePicker } from './DatePicker';
 import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
+import { WabaSelectionBroadcast } from './waba/WabaSelectionBroadcast';
+import { WabaQuickBroadcast } from './waba/WabaQuickBroadcast';
+import { computeWindow, formatRemaining } from './waba/wabaUtils';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { MD_QUERY } from '../lib/viewRouting';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { evolutionApi } from '../lib/evolutionApi';
+import { wabaApi } from '../lib/wabaApi';
+import type { WabaTemplate } from '../lib/wabaApi';
 import type { Cliente } from '../lib/api';
 
 interface AtendimentosViewProps {
@@ -37,6 +41,14 @@ interface ChatMessage {
 interface MeuContato {
   timestamp: string;
   fonte: 'WhatsApp' | 'WABA' | 'ligação';
+}
+
+/** Uma linha do `waba_selecao_janela` — a fonte da verdade sobre o canal. */
+interface JanelaInfo {
+  tem_telefone: boolean;
+  janela_aberta: boolean;
+  opt_out: boolean;
+  ultimo_inbound_at: string | null;
 }
 
 // Pure helpers (no external deps)
@@ -111,93 +123,6 @@ function getPhoneVariants(phone: string): string[] {
   return [...new Set(variants)];
 }
 
-async function persistSentMessage(
-  userId: string,
-  instanceName: string,
-  phone: string,
-  contactName: string,
-  text: string,
-): Promise<void> {
-  const variants = getPhoneVariants(phone);
-  const jid = `${phone}@s.whatsapp.net`;
-  const jidVariants = variants.map(v => `${v}@s.whatsapp.net`);
-  const now = new Date().toISOString();
-
-  let chatId: string | null = null;
-
-  const { data: byPhone } = await supabase
-    .from('persistent_chats')
-    .select('id')
-    .eq('user_id', userId)
-    .in('contact_phone', variants)
-    .limit(1)
-    .maybeSingle();
-  if (byPhone) { chatId = byPhone.id; }
-
-  if (!chatId) {
-    const { data: byJid } = await supabase
-      .from('persistent_chats')
-      .select('id')
-      .eq('user_id', userId)
-      .in('contact_jid', jidVariants)
-      .limit(1)
-      .maybeSingle();
-    if (byJid) { chatId = byJid.id; }
-  }
-
-  if (!chatId) {
-    const { data: created, error } = await supabase
-      .from('persistent_chats')
-      .upsert({
-        user_id: userId,
-        instance_name: instanceName,
-        contact_phone: phone,
-        contact_name: contactName,
-        contact_jid: jid,
-        is_group: false,
-        last_message_from_me: true,
-      }, { onConflict: 'user_id,contact_phone', ignoreDuplicates: false })
-      .select('id')
-      .single();
-
-    if (error) {
-      const { data: fallback } = await supabase
-        .from('persistent_chats')
-        .select('id')
-        .eq('user_id', userId)
-        .in('contact_phone', variants)
-        .limit(1)
-        .maybeSingle();
-      if (fallback) { chatId = fallback.id; } else { return; }
-    } else {
-      chatId = created.id;
-    }
-  }
-
-  await supabase.from('persistent_messages').insert({
-    user_id: userId,
-    chat_id: chatId,
-    instance_name: instanceName,
-    message_id: crypto.randomUUID(),
-    from_me: true,
-    message_text: text,
-    message_type: 'text',
-    timestamp: now,
-    participant_jid: null,
-    media_url: null,
-    media_base64: null,
-  });
-
-  await supabase
-    .from('persistent_chats')
-    .update({
-      last_message_text: text,
-      last_message_timestamp: now,
-      last_message_from_me: true,
-    })
-    .eq('id', chatId);
-}
-
 function applyVars(template: string, c: Cliente): string {
   return template
     .replace(/\{nome_contato\}/g, c.nome || '')
@@ -239,12 +164,26 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
   const [activeTab, setActiveTab] = useState<TabType>('todos');
 
   const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
-  const [instanceName, setInstanceName] = useState<string | null>(null);
 
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sentId, setSentId] = useState<string | null>(null);
+  /** Falha de envio por linha — substitui o `catch {}` silencioso de antes. */
+  const [sendError, setSendError] = useState<{ id: string; message: string } | null>(null);
   const dropdownRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // ── Janela de 24h e seleção ────────────────────────────────────────────────
+  /** Situação de cada cliente exibido, vinda do `waba_selecao_janela`. */
+  const [janelaMap, setJanelaMap] = useState<Map<string, JanelaInfo>>(new Map());
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  /** A janela expira sozinha com o tempo — este relógio força o recálculo. */
+  const [now, setNow] = useState(() => Date.now());
+  /** Templates aprovados, só para estimar o custo do lado pago da barra. */
+  const [approvedTemplates, setApprovedTemplates] = useState<WabaTemplate[]>([]);
+  const [custoTemplate, setCustoTemplate] = useState<number | null>(null);
+  /** Folha aberta: texto livre, ou template para uma lista de ids. */
+  const [quickSheetOpen, setQuickSheetOpen] = useState(false);
+  const [templateSheetIds, setTemplateSheetIds] = useState<string[] | null>(null);
 
   // User's own ligacoes: clienteId → created_at (most recent)
   const [myLigMap, setMyLigMap] = useState<Map<string, string>>(new Map());
@@ -378,17 +317,25 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
       .then(({ data }) => { if (data) setQuickReplies(data); });
   }, [profile?.id]);
 
-  // Load active WhatsApp instance once on mount
+  // A janela de 24h vira com o tempo, não só com eventos — mesmo padrão do WabaView.
   useEffect(() => {
-    if (!profile?.id) return;
+    const timer = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Templates aprovados: só alimentam a estimativa de custo da barra de seleção.
+  useEffect(() => {
+    let cancelled = false;
     supabase
-      .from('whatsapp_instances')
-      .select('instance_name')
-      .eq('user_id', profile.id)
-      .eq('is_active', true)
-      .maybeSingle()
-      .then(({ data }) => { if (data?.instance_name) setInstanceName(data.instance_name); });
-  }, [profile?.id]);
+      .from('waba_templates')
+      .select('*')
+      .eq('status', 'APPROVED')
+      .order('name')
+      .then(({ data }) => {
+        if (!cancelled) setApprovedTemplates((data || []) as WabaTemplate[]);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Scroll to bottom when preview messages load
   useEffect(() => {
@@ -487,24 +434,49 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
     setPreviewLoading(false);
   }, [getChatId]);
 
+  /**
+   * Envio individual pelo número oficial (WABA).
+   *
+   * Caminho direto (`open_chat` + `send_text`) em vez da engine de disparos: uma
+   * linha só não pode esperar até um minuto pelo cron. Aqui as variáveis são
+   * resolvidas no frontend — no lote quem resolve é o servidor.
+   *
+   * Falha nunca é silenciosa: um "Enviado!" numa mensagem que não saiu é pior
+   * do que não ter o botão.
+   */
   const handleSendQuickReply = useCallback(async (c: Cliente, reply: QuickReply) => {
-    if (!instanceName || !c.telefone || !profile?.id) return;
-    const number = c.telefone.replace(/\D/g, '');
     const text = applyVars(reply.message, c);
 
     setOpenDropdown(null);
+    setSendError(prev => (prev?.id === c.id ? null : prev));
     setSendingId(c.id);
     try {
-      await evolutionApi.sendText(instanceName, number, text);
-      await persistSentMessage(profile.id, instanceName, number, c.nome, text);
+      const chat = await wabaApi.openChat(c.id);
+      if (!chat.success) {
+        setSendError({ id: c.id, message: chat.message });
+        return;
+      }
+
+      const result = await wabaApi.sendText(chat.chat_id, text);
+      if (!result.success) {
+        setSendError({
+          id: c.id,
+          message: result.message || 'Não foi possível enviar a mensagem.',
+        });
+        return;
+      }
+
       setSentId(c.id);
       setTimeout(() => setSentId(prev => prev === c.id ? null : prev), 2000);
-    } catch {
-      // silently fail
+    } catch (err) {
+      setSendError({
+        id: c.id,
+        message: err instanceof Error ? err.message : 'Não foi possível enviar a mensagem.',
+      });
     } finally {
       setSendingId(prev => prev === c.id ? null : prev);
     }
-  }, [instanceName, profile?.id]);
+  }, []);
 
   // Classify using user's own contact data (not global ultimo_contato_at)
   const classifyC = useCallback((c: Cliente): ClienteClass => {
@@ -571,6 +543,151 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
   const naoInicRows  = showDividers ? rows.filter(c => classifyC(c) === 'nao_iniciado') : [];
   const iniciadoRows = showDividers ? rows.filter(c => classifyC(c) === 'iniciado') : [];
 
+  // ── Janela de 24h ──────────────────────────────────────────────────────────
+
+  /** Só o conteúdo importa: recriar o array de `rows` não deve refazer a query. */
+  const rowIdsKey = useMemo(() => rows.map(c => c.id).join(','), [rows]);
+
+  /**
+   * Situação de janela de todos os clientes exibidos — não só dos selecionados.
+   * A linha precisa do indicador antes de qualquer seleção, e como a seleção é
+   * sempre um subconjunto das linhas, uma consulta serve aos dois usos.
+   */
+  useEffect(() => {
+    if (!rowIdsKey) { setJanelaMap(new Map()); return; }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      supabase
+        .rpc('waba_selecao_janela', { p_cliente_ids: rowIdsKey.split(',') })
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            console.error('[Atendimentos] Falha ao carregar janelas do WABA:', error.message);
+            return;
+          }
+          const map = new Map<string, JanelaInfo>();
+          for (const row of (data || []) as ({ cliente_id: string } & JanelaInfo)[]) {
+            map.set(row.cliente_id, {
+              tem_telefone: row.tem_telefone,
+              janela_aberta: row.janela_aberta,
+              opt_out: row.opt_out,
+              ultimo_inbound_at: row.ultimo_inbound_at,
+            });
+          }
+          setJanelaMap(map);
+        });
+    }, 300);
+
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [rowIdsKey]);
+
+  /**
+   * A janela está aberta agora?
+   *
+   * O `janela_aberta` da RPC é uma foto do momento da consulta; recalcular pelo
+   * `ultimo_inbound_at` com o relógio local mantém a resposta correta enquanto a
+   * tela fica aberta.
+   */
+  const janelaAberta = useCallback(
+    (id: string): boolean => {
+      const info = janelaMap.get(id);
+      if (!info) return false;
+      return computeWindow(info.ultimo_inbound_at, now).open;
+    },
+    [janelaMap, now]
+  );
+
+  // ── Seleção ────────────────────────────────────────────────────────────────
+
+  // Trocar de aba, status, busca ou data muda o conjunto visível: manter a
+  // seleção antiga faria o assessor disparar para quem não está mais na tela.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [activeTab, filterStatus, search, filterDateFrom, filterDateTo, selectedAssessor]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
+
+  /** Marca ou desmarca de uma vez as linhas de uma seção (já filtradas). */
+  const toggleSection = useCallback((sectionRows: Cliente[]) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      const allSelected = sectionRows.every(c => next.has(c.id));
+      for (const c of sectionRows) {
+        if (allSelected) next.delete(c.id); else next.add(c.id);
+      }
+      return next;
+    });
+  }, []);
+
+  /**
+   * A seleção dividida pelo canal possível. Sem telefone ou com opt-out fica
+   * fora dos dois grupos — não há envio possível por nenhum caminho.
+   */
+  const grupos = useMemo(() => {
+    const comJanela: string[] = [];
+    const semJanela: string[] = [];
+    const ignorados: string[] = [];
+
+    for (const id of selectedIds) {
+      const info = janelaMap.get(id);
+      if (!info || !info.tem_telefone || info.opt_out) { ignorados.push(id); continue; }
+      if (janelaAberta(id)) comJanela.push(id);
+      else semJanela.push(id);
+    }
+    return { comJanela, semJanela, ignorados };
+  }, [selectedIds, janelaMap, janelaAberta]);
+
+  /**
+   * Custo estimado do lado pago. A RPC de prévia exige um template, e o preço
+   * varia ~10x entre UTILITY e MARKETING — a estimativa usa o mais barato
+   * disponível e é exibida como "a partir de".
+   */
+  const templateBarato = useMemo(
+    () =>
+      approvedTemplates.find(t => t.category?.toUpperCase() === 'UTILITY') ??
+      approvedTemplates[0] ??
+      null,
+    [approvedTemplates]
+  );
+
+  const semJanelaKey = grupos.semJanela.join(',');
+
+  useEffect(() => {
+    if (!semJanelaKey || !templateBarato) { setCustoTemplate(null); return; }
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      supabase
+        .rpc('waba_broadcast_preview', {
+          p_filtro: { cliente_ids: semJanelaKey.split(',') },
+          p_template_id: templateBarato.id,
+          p_modo: 'nunca',
+        })
+        .then(({ data, error }) => {
+          if (cancelled || error || !data) return;
+          setCustoTemplate((data as { custo_estimado: number }).custo_estimado);
+        });
+    }, 300);
+
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [semJanelaKey, templateBarato]);
+
+  /** Primeiro destinatário do texto livre — alimenta a prévia da folha. */
+  const exemploQuick = useMemo(() => {
+    const first = grupos.comJanela[0];
+    const cliente = first ? clientes.find(c => c.id === first) : null;
+    return cliente ? { nome: cliente.nome, assessor: cliente.assessor ?? null } : null;
+  }, [grupos.comJanela, clientes]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
   const renderRow = (c: Cliente) => {
     const cls = classifyC(c);
     const myContact = meuUltimoContato.get(c.id);
@@ -583,6 +700,12 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
     const isSending = sendingId === c.id;
     const isSent = sentId === c.id;
     const hasChat = !!c.telefone && !!getChatId(c.telefone);
+    const janela = janelaMap.get(c.id);
+    const windowState = computeWindow(janela?.ultimo_inbound_at, now);
+    // Sem telefone ou com opt-out não há envio por nenhum caminho.
+    const enviavel = !!janela && janela.tem_telefone && !janela.opt_out;
+    const isSelected = selectedIds.has(c.id);
+    const rowError = sendError?.id === c.id ? sendError.message : null;
 
     return (
       <div
@@ -592,6 +715,20 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
       >
         {/* Central area — no click handler, handled by parent */}
         <div className="flex items-center gap-3 flex-1 min-w-0">
+          {/* Seleção — área de clique própria, não abre o preview */}
+          <label
+            className="flex items-center justify-center w-6 h-11 -my-2 flex-shrink-0 cursor-pointer"
+            onClick={e => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => toggleSelect(c.id)}
+              aria-label={`Selecionar ${c.nome}`}
+              className="w-4 h-4 rounded border-slate-300 accent-[#0C447C] cursor-pointer"
+            />
+          </label>
+
           {/* Avatar */}
           <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-semibold ${avatarClass(c.status)}`}>
             {getInitials(c.nome)}
@@ -637,6 +774,15 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
                 </span>
               </>
             )}
+
+            {/* Janela de 24h: só aparece quando aberta — é ela que libera o
+                texto livre gratuito. Fechada é o caso comum e silencioso. */}
+            {windowState.open && (
+              <span className="flex items-center gap-1 text-[11px] text-emerald-700 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                janela {formatRemaining(windowState.remainingMs)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -665,24 +811,32 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
               else dropdownRefs.current.delete(c.id);
             }}
           >
+            {/* O canal é decidido pela janela de 24h, nunca pela aba: fechada,
+                o único caminho é template aprovado (pago). */}
             <button
-              disabled={isSending}
-              onClick={() => setOpenDropdown(prev => prev === c.id ? null : c.id)}
+              disabled={isSending || !enviavel}
+              title={enviavel ? undefined : 'Cliente sem telefone ou que pediu para não receber'}
+              onClick={() => {
+                if (windowState.open) setOpenDropdown(prev => prev === c.id ? null : c.id);
+                else setTemplateSheetIds([c.id]);
+              }}
               className={`w-full flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                 isSent
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                   : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              } disabled:opacity-60`}
+              } disabled:opacity-60 disabled:cursor-not-allowed`}
             >
               {isSending ? (
                 <span className="animate-pulse">Enviando...</span>
               ) : isSent ? (
                 'Enviado!'
-              ) : (
+              ) : windowState.open ? (
                 <>
                   Mensagem rápida
                   <ChevronDown size={11} className={`transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
                 </>
+              ) : (
+                'Enviar template'
               )}
             </button>
 
@@ -705,17 +859,55 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
               </div>
             )}
           </div>
+
+          {/* Falha de envio fica visível na própria linha, com o motivo. */}
+          {rowError && (
+            <p className="flex items-start gap-1 text-[11px] text-red-700 max-w-[220px] leading-snug">
+              <AlertCircle size={12} className="flex-shrink-0 mt-px" />
+              <span className="flex-1">{rowError}</span>
+              <button
+                onClick={() => setSendError(null)}
+                aria-label="Descartar erro"
+                className="flex-shrink-0 text-red-400 hover:text-red-600"
+              >
+                <X size={12} />
+              </button>
+            </p>
+          )}
         </div>
       </div>
     );
   };
 
-  const SectionDivider = ({ color, label }: { color: string; label: string }) => (
-    <div className="flex items-center gap-2 text-xs text-slate-500 font-medium pt-3 pb-2 border-b border-slate-100 mb-2">
-      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
-      {label}
-    </div>
-  );
+  /**
+   * Cabeçalho de seção com "selecionar todos". O checkbox marca apenas as
+   * linhas passadas em `sectionRows`, que já vêm filtradas pela tela.
+   */
+  const SectionDivider = ({
+    color,
+    label,
+    sectionRows,
+  }: { color: string; label: string; sectionRows: Cliente[] }) => {
+    const allSelected = sectionRows.length > 0 && sectionRows.every(c => selectedIds.has(c.id));
+    const someSelected = !allSelected && sectionRows.some(c => selectedIds.has(c.id));
+
+    return (
+      <div className="flex items-center gap-2 text-xs text-slate-500 font-medium pt-3 pb-2 border-b border-slate-100 mb-2">
+        <label className="flex items-center justify-center w-6 h-11 -my-3 flex-shrink-0 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            ref={el => { if (el) el.indeterminate = someSelected; }}
+            onChange={() => toggleSection(sectionRows)}
+            aria-label={`Selecionar todos — ${label}`}
+            className="w-4 h-4 rounded border-slate-300 accent-[#0C447C] cursor-pointer"
+          />
+        </label>
+        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+        {label}
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
@@ -855,28 +1047,110 @@ export function AtendimentosView({ clientes, assessores, onOpenWhatsApp, onOpenW
           <>
             {problemRows.length > 0 && (
               <>
-                <SectionDivider color="#E24B4A" label="Problema — atenção urgente" />
+                <SectionDivider color="#E24B4A" label="Problema — atenção urgente" sectionRows={problemRows} />
                 {problemRows.map(renderRow)}
               </>
             )}
             {naoInicRows.length > 0 && (
               <>
-                <SectionDivider color="#EF9F27" label="Não iniciados — primeiro contato pendente" />
+                <SectionDivider color="#EF9F27" label="Não iniciados — primeiro contato pendente" sectionRows={naoInicRows} />
                 {naoInicRows.map(renderRow)}
               </>
             )}
             {iniciadoRows.length > 0 && (
               <>
-                <SectionDivider color="#1D9E75" label="Iniciados — em atendimento" />
+                <SectionDivider color="#1D9E75" label="Iniciados — em atendimento" sectionRows={iniciadoRows} />
                 {iniciadoRows.map(renderRow)}
               </>
             )}
           </>
         ) : (
-          rows.map(renderRow)
+          <>
+            <SectionDivider color="#94a3b8" label={`${rows.length} clientes`} sectionRows={rows} />
+            {rows.map(renderRow)}
+          </>
         )}
       </div>
+
+      {/* Espaço para a barra de seleção não cobrir a última linha. */}
+      {selectedIds.size > 0 && <div className="h-24" aria-hidden="true" />}
       </>
+      )}
+
+      {/* Barra de seleção — a divisão vem da janela de 24h, não da aba */}
+      {showList && selectedIds.size > 0 && (
+        <div
+          className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.06)]"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
+          <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col md:flex-row md:items-center gap-3">
+            <div className="flex-1 min-w-0 text-xs text-slate-600 leading-relaxed">
+              <strong className="text-slate-800">{selectedIds.size} selecionados</strong>
+              {' → '}
+              <span className="text-emerald-700">
+                {grupos.comJanela.length} com janela aberta (texto livre, grátis)
+              </span>
+              {' · '}
+              <span className="text-slate-700">
+                {grupos.semJanela.length} sem janela (template
+                {grupos.semJanela.length > 0 && custoTemplate !== null
+                  ? `, a partir de ${custoTemplate.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+                  : ''}
+                )
+              </span>
+              {grupos.ignorados.length > 0 && (
+                <span className="block text-slate-400 mt-0.5">
+                  {grupos.ignorados.length} ignorado{grupos.ignorados.length === 1 ? '' : 's'}: sem
+                  telefone ou opt-out
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={clearSelection}
+                className="px-3 min-h-[40px] rounded-lg text-xs font-medium text-slate-500 hover:bg-slate-100 transition-colors"
+              >
+                Limpar
+              </button>
+              <button
+                onClick={() => setQuickSheetOpen(true)}
+                disabled={grupos.comJanela.length === 0}
+                className="px-3 min-h-[40px] rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Mensagem rápida ({grupos.comJanela.length})
+              </button>
+              <button
+                onClick={() => setTemplateSheetIds(grupos.semJanela)}
+                disabled={grupos.semJanela.length === 0}
+                className="px-3 min-h-[40px] rounded-lg text-xs font-semibold bg-[#0C447C] text-white hover:bg-[#0a3a68] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Enviar template ({grupos.semJanela.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Folha de texto livre — só os ids com janela aberta */}
+      {quickSheetOpen && (
+        <WabaQuickBroadcast
+          clienteIds={grupos.comJanela}
+          exemplo={exemploQuick}
+          onClose={() => setQuickSheetOpen(false)}
+          onSent={clearSelection}
+        />
+      )}
+
+      {/* Folha de template. `modoFixo="nunca"`: esta lista já é a carteira de
+          alguém, disparar daqui não pode transferir a posse de ninguém. */}
+      {templateSheetIds && (
+        <WabaSelectionBroadcast
+          clienteIds={templateSheetIds}
+          modoFixo="nunca"
+          onClose={() => setTemplateSheetIds(null)}
+          onSent={clearSelection}
+        />
       )}
 
       {/* Chat preview — modal no desktop, tela cheia no mobile */}

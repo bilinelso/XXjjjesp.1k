@@ -39,6 +39,13 @@ type WabaSelectionBroadcastProps = {
   onClose: () => void;
   /** Chamado no sucesso, antes do passo final — o pai limpa a seleção. */
   onSent: () => void;
+  /**
+   * Trava o modo de atribuição e esconde o seletor. Em telas onde a lista já é
+   * a carteira de alguém (Atendimentos), oferecer transferência de posse
+   * deixaria o master mover a carteira inteira de outro assessor com dois
+   * cliques.
+   */
+  modoFixo?: AtribuicaoModo;
 };
 
 const RPC_ERRORS: Record<string, string> = {
@@ -69,6 +76,7 @@ export const WabaSelectionBroadcast: React.FC<WabaSelectionBroadcastProps> = ({
   clienteIds,
   onClose,
   onSent,
+  modoFixo,
 }) => {
   const [step, setStep] = useState<Step>('template');
   const [templates, setTemplates] = useState<WabaTemplate[]>([]);
@@ -80,7 +88,7 @@ export const WabaSelectionBroadcast: React.FC<WabaSelectionBroadcastProps> = ({
   const [error, setError] = useState<string | null>(null);
   /** Primeiro clique acima dos tetos (custo ou posse) só "arma"; o segundo dispara. */
   const [armed, setArmed] = useState(false);
-  const [modo, setModo] = useState<AtribuicaoModo>('sem_assessor');
+  const [modo, setModo] = useState<AtribuicaoModo>(modoFixo ?? 'sem_assessor');
 
   // Desfazer atribuição, no passo final.
   const [broadcastId, setBroadcastId] = useState<string | null>(null);
@@ -327,7 +335,10 @@ export const WabaSelectionBroadcast: React.FC<WabaSelectionBroadcastProps> = ({
                 <p className="text-sm text-slate-700 whitespace-pre-wrap">{examplePreview}</p>
               </div>
 
-              {/* Modo de atribuição — muda quem fica dono dos destinatários */}
+              {/* Modo de atribuição — muda quem fica dono dos destinatários.
+                  Com `modoFixo` a escolha não existe: o valor travado vai
+                  direto para a RPC. */}
+              {!modoFixo && (
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
                   Atribuição de clientes
@@ -354,6 +365,7 @@ export const WabaSelectionBroadcast: React.FC<WabaSelectionBroadcastProps> = ({
                   ))}
                 </div>
               </div>
+              )}
 
               {loadingPreview ? (
                 <p className="text-sm text-slate-400 flex items-center gap-2">
