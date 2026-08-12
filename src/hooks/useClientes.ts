@@ -95,19 +95,12 @@ export const useClientes = () => {
   const filtrarClientes = (filtros: Filtros): Cliente[] => {
     let resultado = [...clientes];
 
-    // O recorte de data é pela atribuição ao assessor, não pela compra.
     if (filtros.dataInicio) {
-      resultado = resultado.filter(c => {
-        const da = c.data_atribuicao;
-        return !!da && da.slice(0, 10) >= filtros.dataInicio;
-      });
+      resultado = resultado.filter(c => c.data_compra >= filtros.dataInicio);
     }
 
     if (filtros.dataFim) {
-      resultado = resultado.filter(c => {
-        const da = c.data_atribuicao;
-        return !!da && da.slice(0, 10) <= filtros.dataFim;
-      });
+      resultado = resultado.filter(c => c.data_compra <= filtros.dataFim);
     }
 
     if (filtros.assessor && filtros.assessor !== 'todas') {
