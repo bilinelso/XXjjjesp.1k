@@ -34,6 +34,12 @@ function rpcErrorMessage(error: { message?: string } | null, fallback: string): 
 }
 
 /**
+ * O servidor não assina a mensagem quando o corpo já cita o assessor — seria o
+ * nome duas vezes. A prévia segue a mesma regra.
+ */
+const CITA_ASSESSOR = /\{assessor\}/i;
+
+/**
  * Só para a prévia. No envio real quem resolve as variáveis é o servidor, uma
  * vez por destinatário — o texto vai cru para a RPC.
  */
@@ -59,6 +65,8 @@ export const WabaQuickBroadcast: React.FC<WabaQuickBroadcastProps> = ({
   onSent,
 }) => {
   const [replies, setReplies] = useState<QuickReply[]>([]);
+  /** Nome que o cliente lê no cabeçalho. Vazio = sem assessor vinculado. */
+  const [assinatura, setAssinatura] = useState('');
   const [texto, setTexto] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,13 +81,22 @@ export const WabaQuickBroadcast: React.FC<WabaQuickBroadcastProps> = ({
       const userId = userData.user?.id;
       if (!userId) return;
 
-      const { data } = await supabase
-        .from('quick_replies')
-        .select('id, title, message')
-        .eq('user_id', userId)
-        .order('title');
+      const [{ data }, { data: assessor }] = await Promise.all([
+        supabase
+          .from('quick_replies')
+          .select('id, title, message')
+          .eq('user_id', userId)
+          .order('title'),
+        supabase
+          .from('assessores')
+          .select('nome, nome_exibicao')
+          .eq('user_id', userId)
+          .maybeSingle(),
+      ]);
 
-      if (!cancelled) setReplies((data || []) as QuickReply[]);
+      if (cancelled) return;
+      setReplies((data || []) as QuickReply[]);
+      setAssinatura((assessor?.nome_exibicao || assessor?.nome || '').trim());
     })();
     return () => { cancelled = true; };
   }, []);
@@ -244,6 +261,12 @@ export const WabaQuickBroadcast: React.FC<WabaQuickBroadcastProps> = ({
                     Como chega para {exemplo.nome}
                   </p>
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                    {assinatura && !CITA_ASSESSOR.test(trimmed) && (
+                      <>
+                        <strong>{assinatura}:</strong>
+                        {'\n\n'}
+                      </>
+                    )}
                     {previewVars(trimmed, exemplo)}
                   </p>
                 </div>

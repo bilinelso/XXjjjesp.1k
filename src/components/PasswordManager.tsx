@@ -1,23 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import CryptoJS from 'crypto-js';
-import { Plus, Search, Star, Eye, EyeOff, Copy, Check, Pencil, Trash2, X, Save, Lock } from 'lucide-react';
+import { Plus, Search, Star, Eye, EyeOff, Copy, Check, Pencil, Trash2, X, Save, Lock, AlertTriangle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
-const SECRET_KEY = import.meta.env.VITE_CRYPTO_KEY || 'default_key';
-console.log('🔑 SECRET_KEY no componente:', SECRET_KEY);
+const SECRET_KEY = import.meta.env.VITE_CRYPTO_KEY ?? '';
+const hasCryptoKey = SECRET_KEY.trim().length > 0;
 
 function encrypt(plain: string): string {
+  if (!hasCryptoKey) throw new Error('Chave de criptografia ausente');
   return CryptoJS.AES.encrypt(plain, SECRET_KEY).toString();
 }
 
 function decrypt(encrypted: string): string {
+  if (!hasCryptoKey) return '';
   try {
     const bytes = CryptoJS.AES.decrypt(encrypted, SECRET_KEY);
-    const result = bytes.toString(CryptoJS.enc.Utf8);
-    console.log('🔓 decrypt → input:', encrypted, '→ result:', result || '(VAZIO — chave errada ou dado não encriptado)');
-    return result;
-  } catch (err) {
-    console.error('🔓 decrypt → exception:', err, 'input:', encrypted);
+    return bytes.toString(CryptoJS.enc.Utf8);
+  } catch {
     return '';
   }
 }
@@ -62,6 +61,10 @@ export function PasswordManager() {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!hasCryptoKey) {
+      setLoading(false);
+      return;
+    }
     loadEntries();
   }, []);
 
@@ -192,6 +195,34 @@ export function PasswordManager() {
       console.error('Error toggling favorite:', err);
     }
   };
+
+  if (!hasCryptoKey) {
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="bg-purple-100 p-2 rounded-lg">
+            <Lock className="text-purple-600" size={20} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Gerenciador de Senhas</h3>
+            <p className="text-xs text-slate-500">Indisponível</p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <AlertTriangle className="text-amber-500 flex-shrink-0 mt-0.5" size={18} />
+          <div className="text-sm text-amber-900">
+            <p className="font-semibold">Configuração de criptografia ausente</p>
+            <p className="mt-1 text-amber-800">
+              O gerenciador de senhas está desativado porque a chave de criptografia não foi
+              configurada. O administrador precisa definir a variável de ambiente{' '}
+              <code className="font-mono bg-amber-100 px-1 py-0.5 rounded">VITE_CRYPTO_KEY</code>{' '}
+              e reiniciar a aplicação.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

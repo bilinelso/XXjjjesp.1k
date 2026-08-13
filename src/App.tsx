@@ -26,6 +26,7 @@ import { NotificationBell } from './components/NotificationBell';
 import { NotificationCreate } from './components/NotificationCreate';
 import { LeadDistributionConfig } from './components/LeadDistributionConfig';
 import { AssessorComprouConfig } from './components/AssessorComprouConfig';
+import { NomeExibicaoConfig } from './components/NomeExibicaoConfig';
 import { AtendimentosView } from './components/AtendimentosView';
 import { CampanhasView } from './components/CampanhasView';
 import { CampanhaCostConfig } from './components/CampanhaCostConfig';
@@ -3245,6 +3246,7 @@ function AppContent() {
           <h2 className="text-2xl font-bold mb-6">Configurações do Sistema</h2>
 
           <div className="space-y-6">
+            <NomeExibicaoConfig />
             {profile?.is_master && (
               <div className="bg-white p-6 rounded-lg shadow">
                 <UserManagement />
