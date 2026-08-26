@@ -206,7 +206,7 @@ export function RecuperacaoWebinarView() {
   };
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6">
+    <div className="w-full px-4 sm:px-6 py-6">
       {/* Cabeçalho */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div className="flex items-center gap-2.5">
@@ -255,13 +255,13 @@ export function RecuperacaoWebinarView() {
       ) : (
         <>
           {/* Kanban — 6 colunas fixas, sem drag-and-drop */}
-          <div className="flex gap-3 pb-3">
+          <div className="flex gap-3 overflow-x-auto pb-3">
             {COLUNAS.map(coluna => {
               const daColuna = porColuna.get(coluna.evento) ?? [];
               return (
                 <div
                   key={coluna.evento}
-                  className="flex-1 min-w-[150px] bg-slate-50 border border-slate-200 rounded-xl flex flex-col"
+                  className="flex-shrink-0 w-[240px] bg-slate-50 border border-slate-200 rounded-xl flex flex-col"
                 >
                   <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2">
                     <span className="text-[13px] font-semibold text-slate-700 leading-tight">
