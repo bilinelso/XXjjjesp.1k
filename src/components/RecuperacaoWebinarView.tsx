@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Phone, CheckCircle2, XCircle, Hand, Eye, EyeOff, AlertCircle, Video } from 'lucide-react';
+import { Phone, CheckCircle2, XCircle, Hand, Eye, EyeOff, AlertCircle, Video, MessageSquare, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 // ── Kanban de recuperação de webinar ─────────────────────────────────────────
 // As colunas são o progresso do lead DENTRO do webinar (evento_max), calculado
@@ -21,6 +22,7 @@ interface WebinarCard {
   evento_nome: string | null;
   evento_chave: string | null;
   desfecho: Desfecho;
+  responsavel_user_id: string | null;
   responsavel_email: string | null;
   foi_trabalhado: boolean;
   trabalhado_em: string | null;
@@ -52,6 +54,37 @@ const ERRO_MSG: Record<string, string> = {
   nao_autenticado: 'Sessão expirada. Faça login novamente.',
   desfecho_invalido: 'Desfecho inválido.',
 };
+
+interface WabaTemplate {
+  id: string;
+  name: string;
+  category: string | null;
+  language: string | null;
+}
+
+// A RPC `waba_disparar_template_lead` sinaliza falha por RAISE EXCEPTION, então o
+// código chega em `error.message` — às vezes com um detalhe depois de ": ".
+const ERRO_TEMPLATE: Record<string, string> = {
+  WABA_NOT_AUTHENTICATED: 'Sessão expirada. Faça login novamente.',
+  LEAD_NAO_ENCONTRADO: 'Lead não encontrado — a lista foi atualizada.',
+  LEAD_NAO_ASSUMIDO: 'Assuma o lead antes de enviar o template.',
+  LEAD_DE_OUTRO_RESPONSAVEL: 'Este lead é de outro responsável.',
+  LEAD_SEM_TELEFONE: 'Este lead não tem telefone cadastrado.',
+  LEAD_TELEFONE_INVALIDO: 'O telefone deste lead é inválido.',
+  LEAD_OPT_OUT: 'Este contato pediu para não receber mensagens.',
+  WABA_TEMPLATE_NAO_ENCONTRADO: 'Template não encontrado — recarregue a página.',
+  WABA_TEMPLATE_NAO_APROVADO: 'Este template não está aprovado pela Meta.',
+  WABA_SEM_NUMERO_ATIVO: 'Nenhum número do WhatsApp oficial está ativo.',
+};
+
+/** Extrai o código nomeado da mensagem de erro do Postgres. */
+function mensagemErroTemplate(raw: string | undefined): string {
+  const texto = raw ?? '';
+  for (const [codigo, msg] of Object.entries(ERRO_TEMPLATE)) {
+    if (texto.includes(codigo)) return msg;
+  }
+  return 'Não foi possível enfileirar o envio. Tente novamente.';
+}
 
 const DESFECHO_LABEL: Record<string, { texto: string; classe: string }> = {
   ganho: { texto: 'Ganho', classe: 'bg-emerald-100 text-emerald-700' },
@@ -94,6 +127,7 @@ function formatData(iso: string | null): string {
 }
 
 export function RecuperacaoWebinarView() {
+  const { user, profile } = useAuth();
   const [cards, setCards] = useState<WebinarCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [erroFetch, setErroFetch] = useState<string | null>(null);
@@ -101,6 +135,13 @@ export function RecuperacaoWebinarView() {
   const [acaoEmCurso, setAcaoEmCurso] = useState<string | null>(null);
   const [toast, setToast] = useState<{ tipo: 'erro' | 'ok'; texto: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Templates aprovados — carregados uma vez, compartilhados por todos os cards.
+  const [templates, setTemplates] = useState<WabaTemplate[]>([]);
+  const [templatesEstado, setTemplatesEstado] = useState<'idle' | 'carregando' | 'pronto' | 'erro'>('idle');
+  // Card cujo seletor está aberto (só um por vez) e card com envio em curso.
+  const [seletorAberto, setSeletorAberto] = useState<string | null>(null);
+  const [enviando, setEnviando] = useState<string | null>(null);
 
   const showToast = useCallback((tipo: 'erro' | 'ok', texto: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -191,6 +232,57 @@ export function RecuperacaoWebinarView() {
     }
   }, [fetchCards, showToast]);
 
+  /** Busca os templates aprovados na primeira vez que alguém abre o seletor. */
+  const carregarTemplates = useCallback(async () => {
+    setTemplatesEstado('carregando');
+    const { data, error } = await supabase
+      .from('waba_templates')
+      .select('id, name, category, language')
+      .eq('status', 'APPROVED')
+      .order('name');
+
+    if (error) {
+      setTemplatesEstado('erro');
+      return;
+    }
+    setTemplates((data ?? []) as WabaTemplate[]);
+    setTemplatesEstado('pronto');
+  }, []);
+
+  const carregouTemplates = useRef(false);
+
+  const abrirSeletor = useCallback((cardId: string) => {
+    setSeletorAberto(atual => (atual === cardId ? null : cardId));
+    if (!carregouTemplates.current) {
+      carregouTemplates.current = true;
+      void carregarTemplates();
+    }
+  }, [carregarTemplates]);
+
+  const recarregarTemplates = useCallback(() => { void carregarTemplates(); }, [carregarTemplates]);
+
+  /**
+   * Enfileira o disparo. Toda a lógica de envio vive na RPC + engine; aqui só
+   * fechamos o seletor e mantemos o usuário na lista para o próximo lead.
+   */
+  const dispararTemplate = useCallback(async (card: WebinarCard, template: WabaTemplate) => {
+    setEnviando(card.id);
+    try {
+      const { error } = await supabase.rpc('waba_disparar_template_lead', {
+        p_lead_id: card.id,
+        p_template_id: template.id,
+      });
+      if (error) {
+        showToast('erro', mensagemErroTemplate(error.message));
+        return;
+      }
+      setSeletorAberto(null);
+      showToast('ok', `Envio de "${template.name}" enfileirado — sai em até 1 minuto.`);
+    } finally {
+      setEnviando(null);
+    }
+  }, [showToast]);
+
   const assumir = (card: WebinarCard) =>
     executarRpc(card.id, 'webinar_assumir_lead', { p_webinar_id: card.id }, 'Lead assumido.');
 
@@ -261,7 +353,7 @@ export function RecuperacaoWebinarView() {
               return (
                 <div
                   key={coluna.evento}
-                  className="flex-shrink-0 w-[240px] bg-slate-50 border border-slate-200 rounded-xl flex flex-col"
+                  className="flex-1 min-w-[230px] bg-slate-50 border border-slate-200 rounded-xl flex flex-col"
                 >
                   <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2">
                     <span className="text-[13px] font-semibold text-slate-700 leading-tight">
@@ -284,6 +376,17 @@ export function RecuperacaoWebinarView() {
                           onAssumir={() => assumir(card)}
                           onGanho={() => marcarGanho(card)}
                           onPerdido={() => marcarPerdido(card)}
+                          podeEnviarTemplate={
+                            !!card.responsavel_user_id &&
+                            (card.responsavel_user_id === user?.id || !!profile?.is_master)
+                          }
+                          seletorAberto={seletorAberto === card.id}
+                          onToggleSeletor={() => abrirSeletor(card.id)}
+                          templates={templates}
+                          templatesEstado={templatesEstado}
+                          onRecarregarTemplates={recarregarTemplates}
+                          enviandoTemplate={enviando === card.id}
+                          onEnviarTemplate={(tpl) => dispararTemplate(card, tpl)}
                         />
                       ))
                     )}
@@ -371,9 +474,22 @@ interface CardProps {
   onAssumir: () => void;
   onGanho: () => void;
   onPerdido: () => void;
+  podeEnviarTemplate: boolean;
+  seletorAberto: boolean;
+  onToggleSeletor: () => void;
+  templates: WabaTemplate[];
+  templatesEstado: 'idle' | 'carregando' | 'pronto' | 'erro';
+  onRecarregarTemplates: () => void;
+  enviandoTemplate: boolean;
+  onEnviarTemplate: (template: WabaTemplate) => void;
 }
 
-function CardWebinar({ card, ocupado, onAssumir, onGanho, onPerdido }: CardProps) {
+function CardWebinar({
+  card, ocupado, onAssumir, onGanho, onPerdido,
+  podeEnviarTemplate, seletorAberto, onToggleSeletor,
+  templates, templatesEstado, onRecarregarTemplates,
+  enviandoTemplate, onEnviarTemplate,
+}: CardProps) {
   const novo = card.desfecho === 'aberto';
   const titulo = card.nome || formatTelefone(card.telefone_normalized);
 
@@ -411,11 +527,11 @@ function CardWebinar({ card, ocupado, onAssumir, onGanho, onPerdido }: CardProps
         )}
       </div>
 
-      <div className="mt-2.5 flex items-center gap-1.5">
+      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
         {card.desfecho === 'aberto' && (
           <button
             onClick={onAssumir}
-            className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-violet-600 text-white text-[11px] font-medium hover:bg-violet-700 transition-colors"
+            className="flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-violet-600 text-white text-[11px] font-medium hover:bg-violet-700 transition-colors"
           >
             <Hand size={12} />
             Assumir
@@ -424,7 +540,7 @@ function CardWebinar({ card, ocupado, onAssumir, onGanho, onPerdido }: CardProps
         <button
           onClick={onGanho}
           title="Marcar como ganho"
-          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-medium hover:bg-emerald-100 transition-colors"
+          className="flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-medium hover:bg-emerald-100 transition-colors"
         >
           <CheckCircle2 size={12} />
           Ganho
@@ -432,12 +548,79 @@ function CardWebinar({ card, ocupado, onAssumir, onGanho, onPerdido }: CardProps
         <button
           onClick={onPerdido}
           title="Marcar como perdido"
-          className="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-slate-50 text-slate-600 border border-slate-200 text-[11px] font-medium hover:bg-slate-100 transition-colors"
+          className="flex-1 min-w-0 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md bg-slate-50 text-slate-600 border border-slate-200 text-[11px] font-medium hover:bg-slate-100 transition-colors"
         >
           <XCircle size={12} />
           Perdido
         </button>
       </div>
+
+      {/* WhatsApp oficial — só para quem assumiu o lead (ou master). */}
+      {podeEnviarTemplate && (
+        <div className="mt-1.5 relative">
+          <button
+            onClick={onToggleSeletor}
+            disabled={enviandoTemplate}
+            className={`w-full flex items-center justify-center gap-1 px-2 py-1.5 rounded-md border text-[11px] font-medium transition-colors disabled:opacity-60 ${
+              seletorAberto
+                ? 'bg-green-600 text-white border-green-600'
+                : 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+            }`}
+          >
+            {enviandoTemplate
+              ? <Loader2 size={12} className="animate-spin" />
+              : <MessageSquare size={12} />}
+            {enviandoTemplate ? 'Enfileirando…' : 'Enviar template'}
+          </button>
+
+          {seletorAberto && (
+            <div className="absolute left-0 right-0 z-20 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+              <div className="px-2.5 py-1.5 border-b border-slate-100 text-[10px] uppercase tracking-wide text-slate-400">
+                Templates aprovados
+              </div>
+
+              {templatesEstado === 'carregando' && (
+                <div className="px-2.5 py-3 text-[11px] text-slate-400">Carregando…</div>
+              )}
+
+              {templatesEstado === 'erro' && (
+                <button
+                  onClick={onRecarregarTemplates}
+                  className="w-full px-2.5 py-3 text-left text-[11px] text-red-600 hover:bg-red-50"
+                >
+                  Erro ao carregar. Tentar novamente.
+                </button>
+              )}
+
+              {templatesEstado === 'pronto' && templates.length === 0 && (
+                <div className="px-2.5 py-3 text-[11px] text-slate-400">
+                  Nenhum template aprovado disponível.
+                </div>
+              )}
+
+              {templatesEstado === 'pronto' && templates.length > 0 && (
+                <div className="max-h-48 overflow-y-auto">
+                  {templates.map(tpl => (
+                    <button
+                      key={tpl.id}
+                      onClick={() => onEnviarTemplate(tpl)}
+                      disabled={enviandoTemplate}
+                      className="w-full px-2.5 py-2 text-left hover:bg-slate-50 disabled:opacity-60 border-b border-slate-50 last:border-b-0"
+                    >
+                      <span className="block text-[11px] font-medium text-slate-700 break-words">
+                        {tpl.name}
+                      </span>
+                      {tpl.category && (
+                        <span className="block text-[10px] text-slate-400">{tpl.category}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
