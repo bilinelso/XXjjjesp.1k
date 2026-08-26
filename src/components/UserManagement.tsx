@@ -398,6 +398,7 @@ export function UserManagement() {
                         { key: 'can_access_whatsapp', label: 'WhatsApp' },
                         ...(isMasterOriginal ? [{ key: 'can_access_campanhas', label: 'Campanhas' }] : []),
                         { key: 'can_access_passwords', label: 'Senhas' },
+                        { key: 'can_access_recuperacao', label: 'Recuperação' },
                       ].map(({ key, label }) => (
                         <label key={key} className="flex items-center gap-2 cursor-pointer">
                           <input
@@ -443,6 +444,9 @@ export function UserManagement() {
                       )}
                       {user.can_access_passwords && (
                         <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs">Senhas</span>
+                      )}
+                      {user.can_access_recuperacao && (
+                        <span className="px-2 py-1 bg-violet-100 text-violet-700 rounded text-xs">Recuperação</span>
                       )}
                       {!user.can_access_leads && !user.can_access_dashboard && !user.can_access_kanban &&
                        !user.can_access_agendamentos && !user.can_access_config && !user.can_access_formularios && !user.can_access_whatsapp && !user.can_access_campanhas && !user.can_access_passwords && !user.is_master && (

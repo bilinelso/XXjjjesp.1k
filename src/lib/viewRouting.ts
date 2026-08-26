@@ -9,6 +9,7 @@ export type ViewType =
   | 'kanban'
   | 'agendamentos'
   | 'atendimentos'
+  | 'recuperacao'
   | 'campanhas'
   | 'financeiro'
   | 'configuracoes'
@@ -31,6 +32,7 @@ export const ALL_VIEWS: ViewType[] = [
   'formularios',
   'agendamentos',
   'atendimentos',
+  'recuperacao',
   'cliente-oculto',
   'campanhas',
   'whatsapp',

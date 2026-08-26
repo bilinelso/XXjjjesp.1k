@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { LoadingSpinner } from './LoadingSpinner';
-import { CheckCircle, XCircle, ChevronRight, ChevronDown, ShieldCheck } from 'lucide-react';
+import { CheckCircle, XCircle, ChevronRight, ChevronDown } from 'lucide-react';
 
 interface PotentialMatch {
   lead_id: string;
@@ -197,7 +197,11 @@ function MatchCard({ match, expanded, onToggleExpand, notes, onNotesChange, onLi
   );
 }
 
-export function LeadMatchingAudit() {
+interface LeadMatchingAuditProps {
+  onCountChange?: (count: number) => void;
+}
+
+export function LeadMatchingAudit({ onCountChange }: LeadMatchingAuditProps = {}) {
   const [matches, setMatches] = useState<PotentialMatch[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
@@ -216,11 +220,13 @@ export function LeadMatchingAudit() {
         console.error('Erro ao carregar matches:', error);
       } else {
         setMatches(data || []);
+        onCountChange?.((data || []).length);
       }
       setLoading(false);
     }
 
     loadMatches();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleLinkMatch(match: PotentialMatch) {
@@ -238,7 +244,11 @@ export function LeadMatchingAudit() {
     if (error) {
       alert(`Erro ao vincular: ${error.message}`);
     } else if (data?.success) {
-      setMatches(prev => prev.filter(m => m.cliente_id !== match.cliente_id));
+      setMatches(prev => {
+        const next = prev.filter(m => m.cliente_id !== match.cliente_id);
+        onCountChange?.(next.length);
+        return next;
+      });
       setActionNotes(prev => {
         const next = { ...prev };
         delete next[match.cliente_id];
@@ -265,7 +275,11 @@ export function LeadMatchingAudit() {
     if (error) {
       alert(`Erro ao ignorar: ${error.message}`);
     } else if (data?.success) {
-      setMatches(prev => prev.filter(m => m.cliente_id !== match.cliente_id));
+      setMatches(prev => {
+        const next = prev.filter(m => m.cliente_id !== match.cliente_id);
+        onCountChange?.(next.length);
+        return next;
+      });
       setActionNotes(prev => {
         const next = { ...prev };
         delete next[match.cliente_id];
@@ -278,19 +292,7 @@ export function LeadMatchingAudit() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-6 py-6">
-      <div className="mb-6 flex items-start gap-3">
-        <div className="p-2 bg-blue-100 rounded-lg flex-shrink-0">
-          <ShieldCheck size={24} className="text-blue-600" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-slate-900">Auditoria de Leads</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {loading ? 'Carregando…' : `${matches.length} possíve${matches.length === 1 ? 'l match aguardando revisão' : 'is matches aguardando revisão'}`}
-          </p>
-        </div>
-      </div>
-
+    <div>
       {loading && (
         <div className="flex justify-center py-16">
           <LoadingSpinner />

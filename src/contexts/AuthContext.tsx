@@ -19,6 +19,7 @@ export interface UserProfile {
   can_access_campanhas: boolean;
   can_access_financeiro: boolean;
   can_access_passwords: boolean;
+  can_access_recuperacao: boolean;
   assessor_id?: string | null;
 }
 
@@ -130,6 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       whatsapp: 'can_access_whatsapp',
       campanhas: 'can_access_campanhas',
       financeiro: 'can_access_financeiro',
+      recuperacao: 'can_access_recuperacao',
     };
 
     const permission = viewMap[view];

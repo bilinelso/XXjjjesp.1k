@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MinusSquare, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock, Menu, Monitor, Smartphone } from 'lucide-react';
+import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MinusSquare, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock, Menu, Monitor, Smartphone, Video } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
@@ -34,8 +34,9 @@ import { CampanhaMatchingConfig } from './components/CampanhaMatchingConfig';
 import { FinanceiroView } from './components/FinanceiroView';
 import { AddLeadManualModal } from './components/AddLeadManualModal';
 import { PasswordManager } from './components/PasswordManager';
-import { LeadMatchingAudit } from './components/LeadMatchingAudit';
+import { AuditoriaView } from './components/AuditoriaView';
 import { ShadowClientView } from './components/ShadowClientView';
+import { RecuperacaoWebinarView } from './components/RecuperacaoWebinarView';
 import { WabaView } from './components/waba/WabaView';
 import { LeadCardList } from './components/LeadCardList';
 import { LeadSortMenu } from './components/LeadSortMenu';
@@ -1520,13 +1521,16 @@ function AppContent() {
               )}
             </NavGroup>
           )}
-          {(navVisible('agendamentos') || navVisible('atendimentos') || navVisible('cliente-oculto')) && (
+          {(navVisible('agendamentos') || navVisible('atendimentos') || navVisible('recuperacao') || navVisible('cliente-oculto')) && (
             <NavGroup label="Operacional" collapsed={navCollapsed}>
               {navVisible('agendamentos') && (
                 <NavItem icon={<Calendar size={18} />} label="Agendamentos" active={view === 'agendamentos'} collapsed={navCollapsed} onClick={() => navigate('agendamentos')} />
               )}
               {navVisible('atendimentos') && (
                 <NavItem icon={<Users size={18} />} label="Atendimentos" active={view === 'atendimentos'} collapsed={navCollapsed} onClick={() => navigate('atendimentos')} />
+              )}
+              {navVisible('recuperacao') && (
+                <NavItem icon={<Video size={18} />} label="Recuperação" active={view === 'recuperacao'} collapsed={navCollapsed} onClick={() => navigate('recuperacao')} />
               )}
               {navVisible('cliente-oculto') && (
                 <NavItem icon={<Eye size={18} />} label="Cliente Oculto" active={view === 'cliente-oculto'} collapsed={navCollapsed} onClick={() => navigate('cliente-oculto')} />
@@ -1574,7 +1578,7 @@ function AppContent() {
                 <NavItem icon={<Lock size={18} />} label="Senhas" active={view === 'senhas'} collapsed={navCollapsed} onClick={() => navigate('senhas')} />
               )}
               {navVisible('lead-audit') && (
-                <NavItem icon={<Search size={18} />} label="Auditoria Leads" active={view === 'lead-audit'} collapsed={navCollapsed} onClick={() => navigate('lead-audit')} />
+                <NavItem icon={<Search size={18} />} label="Auditoria" active={view === 'lead-audit'} collapsed={navCollapsed} onClick={() => navigate('lead-audit')} />
               )}
             </NavGroup>
           )}
@@ -3074,6 +3078,10 @@ function AppContent() {
         />
       )}
 
+      {view === 'recuperacao' && canAccess('recuperacao') && (
+        <RecuperacaoWebinarView />
+      )}
+
       {view === 'campanhas' && (profile?.is_master || profile?.can_access_campanhas) && (
         <CampanhasView
           clientes={clientes}
@@ -3093,7 +3101,7 @@ function AppContent() {
       )}
 
       {view === 'lead-audit' && profile?.is_master && (
-        <LeadMatchingAudit />
+        <AuditoriaView />
       )}
 
       {view === 'cliente-oculto' && profile?.is_master && (
