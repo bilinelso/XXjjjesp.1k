@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Phone, RefreshCw, CheckCircle2, XCircle, Hand, Eye, EyeOff, AlertCircle, Video } from 'lucide-react';
+import { Phone, CheckCircle2, XCircle, Hand, Eye, EyeOff, AlertCircle, Video } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
 // ── Kanban de recuperação de webinar ─────────────────────────────────────────
@@ -240,13 +240,6 @@ export function RecuperacaoWebinarView() {
               </span>
             )}
           </button>
-          <button
-            onClick={fetchCards}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 transition-colors"
-          >
-            <RefreshCw size={15} />
-            Atualizar
-          </button>
         </div>
       </div>
 
@@ -262,13 +255,13 @@ export function RecuperacaoWebinarView() {
       ) : (
         <>
           {/* Kanban — 6 colunas fixas, sem drag-and-drop */}
-          <div className="flex gap-3 overflow-x-auto pb-3">
+          <div className="flex gap-3 pb-3">
             {COLUNAS.map(coluna => {
               const daColuna = porColuna.get(coluna.evento) ?? [];
               return (
                 <div
                   key={coluna.evento}
-                  className="flex-shrink-0 w-[268px] bg-slate-50 border border-slate-200 rounded-xl flex flex-col"
+                  className="flex-1 min-w-[150px] bg-slate-50 border border-slate-200 rounded-xl flex flex-col"
                 >
                   <div className="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2">
                     <span className="text-[13px] font-semibold text-slate-700 leading-tight">
