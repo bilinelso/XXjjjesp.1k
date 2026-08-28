@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Phone, CheckCircle2, XCircle, Hand, Eye, EyeOff, AlertCircle, Video, MessageSquare, Loader2 } from 'lucide-react';
+import { Phone, CheckCircle2, XCircle, Hand, Eye, EyeOff, AlertCircle, Video, MessageSquare, Loader2, Calendar, X } from 'lucide-react';
+import { buildTemplatePreview, parseTemplate } from './waba/wabaUtils';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -60,6 +61,8 @@ interface WabaTemplate {
   name: string;
   category: string | null;
   language: string | null;
+  /** `components` da Meta — só o preview usa, via `parseTemplate`. */
+  components: unknown;
 }
 
 // A RPC `waba_disparar_template_lead` sinaliza falha por RAISE EXCEPTION, então o
@@ -126,12 +129,71 @@ function formatData(iso: string | null): string {
   });
 }
 
+// ── Filtro por data de entrada no funil (created_at) ─────────────────────────
+// Os boundaries de dia são sempre calculados em America/Sao_Paulo, nunca no fuso
+// do navegador: um lead que entrou às 23:59 em SP tem que ficar no dia dele.
+// SP não tem horário de verão desde 2019, então o offset fixo -03:00 é seguro.
+// Se algum dia voltar, derivar o offset com Intl.DateTimeFormat + timeZoneName.
+
+type Preset = 'tudo' | 'hoje' | '7d' | '30d' | 'custom';
+
+interface Janela {
+  startUtc: string | null;
+  endUtc: string | null;
+}
+
+/** Instante UTC (ISO) correspondente ao início/fim de uma data-calendário em SP. */
+function spDayBoundaryToUtc(dateStr: string, edge: 'start' | 'end'): string {
+  const time = edge === 'start' ? '00:00:00.000' : '23:59:59.999';
+  return new Date(`${dateStr}T${time}-03:00`).toISOString();
+}
+
+/** 'YYYY-MM-DD' de hoje em São Paulo — 'en-CA' já formata nessa ordem. */
+function todayInSaoPaulo(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+}
+
+/** Desloca uma data-calendário em dias usando aritmética em UTC (meio-dia como âncora). */
+function shiftDate(dateStr: string, dias: number): string {
+  const base = new Date(`${dateStr}T12:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + dias);
+  return base.toISOString().slice(0, 10);
+}
+
+/** Preset e intervalo custom resolvem para o mesmo par de boundaries UTC. */
+function resolverJanela(preset: Preset, de: string, ate: string): Janela {
+  if (preset === 'tudo') return { startUtc: null, endUtc: null };
+
+  if (preset === 'custom') {
+    return {
+      startUtc: de ? spDayBoundaryToUtc(de, 'start') : null,
+      endUtc: ate ? spDayBoundaryToUtc(ate, 'end') : null,
+    };
+  }
+
+  const hoje = todayInSaoPaulo();
+  const inicio = preset === 'hoje' ? hoje : shiftDate(hoje, preset === '7d' ? -6 : -29);
+  return { startUtc: spDayBoundaryToUtc(inicio, 'start'), endUtc: spDayBoundaryToUtc(hoje, 'end') };
+}
+
+const PRESETS: { id: Preset; label: string }[] = [
+  { id: 'hoje', label: 'Hoje' },
+  { id: '7d', label: '7 dias' },
+  { id: '30d', label: '30 dias' },
+  { id: 'tudo', label: 'Tudo' },
+];
+
 export function RecuperacaoWebinarView() {
   const { user, profile } = useAuth();
   const [cards, setCards] = useState<WebinarCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [erroFetch, setErroFetch] = useState<string | null>(null);
   const [mostrarFechados, setMostrarFechados] = useState(false);
+  // Filtro por created_at. `preset` e o intervalo custom são mutuamente
+  // exclusivos na intenção: escolher um preset zera as datas e vice-versa.
+  const [preset, setPreset] = useState<Preset>('tudo');
+  const [dataDe, setDataDe] = useState('');
+  const [dataAte, setDataAte] = useState('');
   const [acaoEmCurso, setAcaoEmCurso] = useState<string | null>(null);
   const [toast, setToast] = useState<{ tipo: 'erro' | 'ok'; texto: string } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -142,6 +204,10 @@ export function RecuperacaoWebinarView() {
   // Card cujo seletor está aberto (só um por vez) e card com envio em curso.
   const [seletorAberto, setSeletorAberto] = useState<string | null>(null);
   const [enviando, setEnviando] = useState<string | null>(null);
+  /** Template em preview e o lead de onde ele foi aberto; null = modal fechado. */
+  const [preview, setPreview] = useState<{ template: WabaTemplate; leadNome: string | null } | null>(null);
+  /** Nome do assessor logado — resolve `{{2}}` no preview. */
+  const [assessorNome, setAssessorNome] = useState<string | null>(null);
 
   const showToast = useCallback((tipo: 'erro' | 'ok', texto: string) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -151,12 +217,25 @@ export function RecuperacaoWebinarView() {
 
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
+  const janela = useMemo(() => resolverJanela(preset, dataDe, dataAte), [preset, dataDe, dataAte]);
+
+  // O canal Realtime usa `fetchCards` como callback. Lendo a janela por ref
+  // mantemos o callback estável e o canal não é recriado a cada troca de filtro.
+  const janelaRef = useRef<Janela>(janela);
+
   const fetchCards = useCallback(async () => {
     setErroFetch(null);
-    const { data, error } = await supabase
+    const { startUtc, endUtc } = janelaRef.current;
+
+    let query = supabase
       .from('webinar_kanban')
       .select('*')
       .order('created_at', { ascending: false });
+
+    if (startUtc) query = query.gte('created_at', startUtc);
+    if (endUtc) query = query.lte('created_at', endUtc);
+
+    const { data, error } = await query;
 
     if (error) {
       setErroFetch(error.message);
@@ -167,7 +246,12 @@ export function RecuperacaoWebinarView() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchCards(); }, [fetchCards]);
+  // Primeira carga e toda troca de filtro passam por aqui.
+  useEffect(() => {
+    janelaRef.current = janela;
+    setLoading(true);
+    void fetchCards();
+  }, [janela, fetchCards]);
 
   // Um único canal para a tabela — novo lead, avanço de evento e fechamento
   // automático por compra chegam todos por aqui.
@@ -232,12 +316,27 @@ export function RecuperacaoWebinarView() {
     }
   }, [fetchCards, showToast]);
 
+  // Mesma resolução do WabaView: `nome_exibicao` é o nome que o cliente vê,
+  // `nome` só entra como fallback.
+  useEffect(() => {
+    if (!profile?.assessor_id) {
+      setAssessorNome(null);
+      return;
+    }
+    supabase
+      .from('assessores')
+      .select('nome, nome_exibicao')
+      .eq('id', profile.assessor_id)
+      .maybeSingle()
+      .then(({ data }) => setAssessorNome(data?.nome_exibicao?.trim() || data?.nome || null));
+  }, [profile?.assessor_id]);
+
   /** Busca os templates aprovados na primeira vez que alguém abre o seletor. */
   const carregarTemplates = useCallback(async () => {
     setTemplatesEstado('carregando');
     const { data, error } = await supabase
       .from('waba_templates')
-      .select('id, name, category, language')
+      .select('id, name, category, language, components')
       .eq('status', 'APPROVED')
       .order('name');
 
@@ -297,6 +396,19 @@ export function RecuperacaoWebinarView() {
       { p_webinar_id: card.id, p_desfecho: 'perdido' }, 'Marcado como perdido.');
   };
 
+  /** Preset limpa o intervalo custom — os dois modos não convivem. */
+  const escolherPreset = (novo: Preset) => {
+    setPreset(novo);
+    setDataDe('');
+    setDataAte('');
+  };
+
+  /** Mexer em qualquer input de data joga o filtro para o modo custom. */
+  const mudarData = (edge: 'de' | 'ate', valor: string) => {
+    if (edge === 'de') setDataDe(valor); else setDataAte(valor);
+    setPreset('custom');
+  };
+
   return (
     <div className="w-full px-4 sm:px-6 py-6">
       {/* Cabeçalho */}
@@ -313,7 +425,43 @@ export function RecuperacaoWebinarView() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Filtro por data de entrada no funil (created_at), em horário de Brasília. */}
+          <div className="flex items-center gap-1 p-1 bg-white border border-slate-200 rounded-lg">
+            <Calendar size={14} className="ml-1.5 text-slate-400" />
+            {PRESETS.map(p => (
+              <button
+                key={p.id}
+                onClick={() => escolherPreset(p.id)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  preset === p.id ? 'bg-violet-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className={`flex items-center gap-1.5 px-2 py-1 bg-white border rounded-lg ${
+            preset === 'custom' ? 'border-violet-400' : 'border-slate-200'
+          }`}>
+            <input
+              type="date"
+              value={dataDe}
+              max={dataAte || undefined}
+              onChange={e => mudarData('de', e.target.value)}
+              className="px-1 py-1 text-xs text-slate-700 bg-transparent outline-none"
+            />
+            <span className="text-xs text-slate-400">até</span>
+            <input
+              type="date"
+              value={dataAte}
+              min={dataDe || undefined}
+              onChange={e => mudarData('ate', e.target.value)}
+              className="px-1 py-1 text-xs text-slate-700 bg-transparent outline-none"
+            />
+          </div>
+
           <button
             onClick={() => setMostrarFechados(v => !v)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -387,6 +535,7 @@ export function RecuperacaoWebinarView() {
                           onRecarregarTemplates={recarregarTemplates}
                           enviandoTemplate={enviando === card.id}
                           onEnviarTemplate={(tpl) => dispararTemplate(card, tpl)}
+                          onPreviewTemplate={(tpl) => setPreview({ template: tpl, leadNome: card.nome })}
                         />
                       ))
                     )}
@@ -455,15 +604,86 @@ export function RecuperacaoWebinarView() {
         </>
       )}
 
+      {preview && (
+        <PreviewTemplateModal
+          template={preview.template}
+          leadNome={preview.leadNome}
+          assessorNome={assessorNome}
+          onClose={() => setPreview(null)}
+        />
+      )}
+
       {toast && (
         <div
-          className={`fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-lg shadow-lg text-sm text-white ${
+          className={`fixed bottom-24 right-5 z-[60] max-w-sm px-4 py-3 rounded-lg shadow-lg text-sm text-white ${
             toast.tipo === 'erro' ? 'bg-red-600' : 'bg-emerald-600'
           }`}
         >
           {toast.texto}
         </div>
       )}
+    </div>
+  );
+}
+
+interface PreviewModalProps {
+  template: WabaTemplate;
+  /** Nome do lead do card — resolve `{{1}}`. */
+  leadNome: string | null;
+  /** `nome_exibicao` do assessor logado — resolve `{{2}}`. */
+  assessorNome: string | null;
+  onClose: () => void;
+}
+
+/**
+ * Preview somente-leitura do template. Reaproveita a montagem do módulo WABA
+ * (`parseTemplate` + `buildTemplatePreview`) — aqui não há envio nem edição.
+ */
+function PreviewTemplateModal({ template, leadNome, assessorNome, onClose }: PreviewModalProps) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const texto = useMemo(() => {
+    const shape = parseTemplate(template);
+    const valores: Record<number, string> = {};
+    const primeiroNome = leadNome?.trim().split(/\s+/)[0];
+    if (primeiroNome) valores[1] = primeiroNome;
+    if (assessorNome?.trim()) valores[2] = assessorNome.trim();
+    return buildTemplatePreview(shape, valores);
+  }, [template, leadNome, assessorNome]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md bg-white rounded-lg shadow-xl overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-100">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wide text-slate-400">Preview</p>
+            <p className="text-[13px] font-semibold text-slate-800 break-words">{template.name}</p>
+          </div>
+          <button
+            onClick={onClose}
+            title="Fechar"
+            className="flex-shrink-0 p-1 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-4 py-3 max-h-[60vh] overflow-y-auto">
+          <p className="text-[13px] text-slate-700 whitespace-pre-wrap break-words">
+            {texto || 'Este template não tem texto para exibir.'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -482,13 +702,14 @@ interface CardProps {
   onRecarregarTemplates: () => void;
   enviandoTemplate: boolean;
   onEnviarTemplate: (template: WabaTemplate) => void;
+  onPreviewTemplate: (template: WabaTemplate) => void;
 }
 
 function CardWebinar({
   card, ocupado, onAssumir, onGanho, onPerdido,
   podeEnviarTemplate, seletorAberto, onToggleSeletor,
   templates, templatesEstado, onRecarregarTemplates,
-  enviandoTemplate, onEnviarTemplate,
+  enviandoTemplate, onEnviarTemplate, onPreviewTemplate,
 }: CardProps) {
   const novo = card.desfecho === 'aberto';
   const titulo = card.nome || formatTelefone(card.telefone_normalized);
@@ -601,19 +822,31 @@ function CardWebinar({
               {templatesEstado === 'pronto' && templates.length > 0 && (
                 <div className="max-h-48 overflow-y-auto">
                   {templates.map(tpl => (
-                    <button
+                    <div
                       key={tpl.id}
-                      onClick={() => onEnviarTemplate(tpl)}
-                      disabled={enviandoTemplate}
-                      className="w-full px-2.5 py-2 text-left hover:bg-slate-50 disabled:opacity-60 border-b border-slate-50 last:border-b-0"
+                      className="flex items-center border-b border-slate-50 last:border-b-0"
                     >
-                      <span className="block text-[11px] font-medium text-slate-700 break-words">
-                        {tpl.name}
-                      </span>
-                      {tpl.category && (
-                        <span className="block text-[10px] text-slate-400">{tpl.category}</span>
-                      )}
-                    </button>
+                      <button
+                        onClick={() => onEnviarTemplate(tpl)}
+                        disabled={enviandoTemplate}
+                        className="flex-1 min-w-0 px-2.5 py-2 text-left hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        <span className="block text-[11px] font-medium text-slate-700 break-words">
+                          {tpl.name}
+                        </span>
+                        {tpl.category && (
+                          <span className="block text-[10px] text-slate-400">{tpl.category}</span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => onPreviewTemplate(tpl)}
+                        title="Ver preview da mensagem"
+                        className="flex-shrink-0 flex items-center gap-1 px-2 py-2 mr-1 rounded-md text-[10px] text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                      >
+                        <Eye size={12} />
+                        Preview
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}

@@ -51,9 +51,10 @@ interface InternalChatProps {
   onOpenWhatsApp?: (phone: string) => void;
   onOpenWabaChat?: (chatId: string) => void;
   onOpenCliente?: (clienteId: string) => void;
+  raiseAboveComposer?: boolean;
 }
 
-export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: InternalChatProps) {
+export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente, raiseAboveComposer = false }: InternalChatProps) {
   const { user, profile } = useAuth();
   const { notifyChat } = useNotifications();
   const [open, setOpen] = useState(false);
@@ -435,7 +436,7 @@ export function InternalChat({ onOpenWhatsApp, onOpenWabaChat, onOpenCliente }: 
   };
 
   return (
-    <div className="fixed bottom-6 right-6 z-50">
+    <div className={`fixed right-6 z-50 ${raiseAboveComposer ? 'bottom-24' : 'bottom-6'}`}>
       {/* Panel */}
       {open && (
         <div className="absolute bottom-16 right-0 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"

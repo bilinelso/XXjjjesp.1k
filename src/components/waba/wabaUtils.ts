@@ -259,7 +259,7 @@ export interface TemplateShape {
  * única para o template inteiro: {{1}} no header e {{1}} no body são a mesma
  * variável.
  */
-export function parseTemplate(template: WabaTemplate): TemplateShape {
+export function parseTemplate(template: Pick<WabaTemplate, 'components'>): TemplateShape {
   const components = parseComponents(template.components);
   const header = componentText(components, 'HEADER');
   const body = componentText(components, 'BODY');

@@ -3621,6 +3621,7 @@ function AppContent() {
           onOpenWhatsApp={handleOpenWhatsApp}
           onOpenWabaChat={handleOpenWabaChat}
           onOpenCliente={handleOpenClienteFromWaba}
+          raiseAboveComposer={view === 'waba'}
         />
       )}
 
