@@ -3079,7 +3079,7 @@ function AppContent() {
       )}
 
       {view === 'recuperacao' && canAccess('recuperacao') && (
-        <RecuperacaoWebinarView />
+        <RecuperacaoWebinarView onOpenWabaChat={handleOpenWabaChat} />
       )}
 
       {view === 'campanhas' && (profile?.is_master || profile?.can_access_campanhas) && (
