@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MinusSquare, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock, Menu, Monitor, Smartphone, Video } from 'lucide-react';
+import { Users, TrendingUp, DollarSign, AlertCircle, Download, Filter, Phone, Search, X, LayoutGrid, List, Calendar, Settings, LogOut, Upload, FileText, ArrowUpDown, ArrowUp, ArrowDown, RefreshCw, CreditCard as Edit2, Check, ChevronDown, Eye, ClipboardList, CheckSquare, Square, MinusSquare, MessageCircle, BadgeCheck, User, ChevronLeft, ChevronRight, Lock, Menu, Monitor, Smartphone, Video, Route } from 'lucide-react';
 import { useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
@@ -12,6 +12,7 @@ import { useLeads } from './hooks/useLeads';
 import { Leadboard } from './components/Leadboard';
 import { ClientDetailModal } from './components/ClientDetailModal';
 import { LeadTrackingModal } from './components/LeadTrackingModal';
+import { LeadTrilhaModal } from './components/LeadTrilhaModal';
 import { BulkEditModal } from './components/BulkEditModal';
 import { DatePicker } from './components/DatePicker';
 import { Pagination } from './components/Pagination';
@@ -31,6 +32,7 @@ import { AtendimentosView } from './components/AtendimentosView';
 import { CampanhasView } from './components/CampanhasView';
 import { CampanhaCostConfig } from './components/CampanhaCostConfig';
 import { CampanhaMatchingConfig } from './components/CampanhaMatchingConfig';
+import { ExportLeadsConfig } from './components/ExportLeadsConfig';
 import { FinanceiroView } from './components/FinanceiroView';
 import { AddLeadManualModal } from './components/AddLeadManualModal';
 import { PasswordManager } from './components/PasswordManager';
@@ -184,6 +186,7 @@ function AppContent() {
   const [showModal, setShowModal] = useState(false);
   const [autoOpenAgendamento, setAutoOpenAgendamento] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [trilhaLead, setTrilhaLead] = useState<Lead | null>(null);
   const [showLeadModal, setShowLeadModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -249,12 +252,12 @@ function AppContent() {
   const [showSelectionBroadcast, setShowSelectionBroadcast] = useState(false);
 
   /**
-   * No celular não existe posição segura para o botão flutuante do chat
-   * interno em duas situações: no WABA (o composer fica colado no rodapé) e na
-   * Lista com seleção ativa (a barra de seleção fixa ocupa o mesmo canto).
+   * O botão flutuante do chat interno fica oculto no WABA (cobre a conversa e o
+   * composer em qualquer tamanho de tela) e, no celular, na Lista com seleção
+   * ativa (a barra de seleção fixa ocupa o mesmo canto).
    */
   const hideInternalChat =
-    (view === 'waba' && !isMdUp) ||
+    view === 'waba' ||
     (view === 'leads' && !isMdUp && selectedClienteIds.size > 0);
   const [whatsappTargetPhone, setWhatsappTargetPhone] = useState<string | null>(null);
   const [whatsappUnread, setWhatsappUnread] = useState(0);
@@ -3197,15 +3200,27 @@ function AppContent() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button
-                            onClick={() => {
-                              setSelectedLead(lead);
-                              setShowLeadModal(true);
-                            }}
-                            className="text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors"
-                          >
-                            Ver rastreamento
-                          </button>
+                          <div className="flex items-center justify-end gap-4">
+                            {lead.telefone && (
+                              <button
+                                onClick={() => setTrilhaLead(lead)}
+                                className="flex items-center gap-1 text-slate-600 hover:text-slate-900 text-sm font-medium transition-colors"
+                                title="Ver trilha do lead"
+                              >
+                                <Route size={16} />
+                                Trilha
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                setSelectedLead(lead);
+                                setShowLeadModal(true);
+                              }}
+                              className="text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors"
+                            >
+                              Ver rastreamento
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -3265,6 +3280,7 @@ function AppContent() {
             {profile?.is_master && <AssessorComprouConfig />}
             {profile?.is_master && <CampanhaCostConfig />}
             {profile?.is_master && <CampanhaMatchingConfig />}
+            {profile?.is_master && <ExportLeadsConfig />}
             <AssessorManagement />
             <div className="bg-white p-6 rounded-lg shadow">
               <h3 className="text-xl font-bold mb-4">Webhook Hotmart</h3>
@@ -3606,6 +3622,14 @@ function AppContent() {
         />
       )}
 
+      {trilhaLead && (
+        <LeadTrilhaModal
+          nome={capitalizeName(trilhaLead.nome)}
+          telefone={trilhaLead.telefone}
+          onClose={() => setTrilhaLead(null)}
+        />
+      )}
+
       {showLeadModal && selectedLead && (
         <LeadTrackingModal
           lead={selectedLead}
@@ -3616,14 +3640,15 @@ function AppContent() {
         />
       )}
 
-      {!hideInternalChat && (
+      {/* Oculto via CSS (nunca desmontado): mantém o canal Realtime, a contagem
+          de não lidas e o estado aberto/fechado do painel. */}
+      <div className={hideInternalChat ? 'hidden' : undefined}>
         <InternalChat
           onOpenWhatsApp={handleOpenWhatsApp}
           onOpenWabaChat={handleOpenWabaChat}
           onOpenCliente={handleOpenClienteFromWaba}
-          raiseAboveComposer={view === 'waba'}
         />
-      )}
+      </div>
 
       {showAddLeadModal && (
         <AddLeadManualModal

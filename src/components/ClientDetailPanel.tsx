@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { X, CreditCard as Edit2, Save, Phone, Plus, EyeOff, Eye, Info, CheckCircle, Calendar, History, ChevronLeft, ChevronRight, Send } from 'lucide-react';
+import { X, CreditCard as Edit2, Save, Phone, Plus, EyeOff, Eye, Info, CheckCircle, Calendar, History, ChevronLeft, ChevronRight, ChevronDown, Send, Route } from 'lucide-react';
 import type { Cliente, Ligacao, Agendamento } from '../lib/api';
 import { useLigacoes } from '../hooks/useLigacoes';
 import { useAgendamentos } from '../hooks/useAgendamentos';
@@ -14,6 +14,7 @@ import { DepositoHistoricoModal } from './DepositoHistoricoModal';
 import { WabaClientHistory } from './waba/WabaClientHistory';
 import { WabaClientAtendimentos } from './waba/WabaClientAtendimentos';
 import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
+import { LeadTrilha } from './LeadTrilha';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { MD_QUERY } from '../lib/viewRouting';
 
@@ -99,6 +100,8 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
   const [togglingVisibility, setTogglingVisibility] = useState(false);
   const [showDepositoHistorico, setShowDepositoHistorico] = useState(false);
   const [ligacaoPage, setLigacaoPage] = useState(0);
+  const [showTrilha, setShowTrilha] = useState(false);
+  const [trilhaSemPermissao, setTrilhaSemPermissao] = useState(false);
   // Non-masters see an empty deposit input; track what they type separately
   const [nonMasterDeposito, setNonMasterDeposito] = useState('');
 
@@ -844,6 +847,31 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
             {/* No painel lateral do WABA a conversa completa já está na coluna
                 do meio — o preview seria redundante. */}
             {!compact && <WabaClientHistory clienteId={cliente.id} />}
+
+            {/* Trilha só no painel completo; a RPC é chamada apenas ao expandir. */}
+            {!compact && cliente.telefone && !trilhaSemPermissao && (
+              <div className="mb-6">
+                <button
+                  type="button"
+                  onClick={() => setShowTrilha(v => !v)}
+                  className="w-full flex items-center justify-between font-bold mb-3"
+                  aria-expanded={showTrilha}
+                >
+                  <span className="flex items-center gap-2">
+                    <Route size={20} />
+                    Trilha do lead
+                  </span>
+                  <ChevronDown size={18} className={`transition-transform ${showTrilha ? 'rotate-180' : ''}`} />
+                </button>
+                {showTrilha && (
+                  <LeadTrilha
+                    key={cliente.telefone}
+                    telefone={cliente.telefone}
+                    onSemPermissao={() => setTrilhaSemPermissao(true)}
+                  />
+                )}
+              </div>
+            )}
 
             <div className="border-t pt-4">
               <h3 className="font-bold mb-3">Novo registro</h3>
