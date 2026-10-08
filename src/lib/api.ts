@@ -1,3 +1,5 @@
+import { getAuthHeaders } from './authHeaders';
+
 const API_BASE_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/crm-api`;
 
 export type Lead = {
@@ -80,11 +82,11 @@ export type Filtros = {
 
 class CRMApi {
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+    const authHeaders = await getAuthHeaders();
     const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        ...authHeaders,
         ...options?.headers,
       },
     });
@@ -173,10 +175,7 @@ class CRMApi {
   async syncLeads(): Promise<{ success: boolean; total_vinculados: number; vinculados_por_email: number; vinculados_por_telefone: number }> {
     const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/sync-leads`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-      },
+      headers: await getAuthHeaders(),
     });
 
     if (!response.ok) {

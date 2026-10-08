@@ -21,6 +21,7 @@ import type { Cliente, Filtros, Agendamento } from './lib/api';
 import type { Lead } from './hooks/useLeads';
 import { capitalizeName, normalizeAssessor } from './utils/formatters';
 import { supabase } from './lib/supabase';
+import { getAuthHeaders } from './lib/authHeaders';
 import { WhatsAppView } from './components/whatsapp/WhatsAppView';
 import { InternalChat } from './components/InternalChat';
 import { NotificationBell } from './components/NotificationBell';
@@ -993,16 +994,15 @@ function AppContent() {
     let successCount = 0;
     const total = selectedClientes.length;
 
+    const authHeaders = await getAuthHeaders();
+
     for (const cliente of selectedClientes) {
       try {
         const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-gclid-conversion`;
 
         const response = await fetch(apiUrl, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-            'Content-Type': 'application/json',
-          },
+          headers: authHeaders,
           body: JSON.stringify({ clienteId: cliente.id })
         });
 

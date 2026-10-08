@@ -17,6 +17,7 @@ import { WhatsAppChannelMenu } from './waba/WhatsAppChannelMenu';
 import { LeadTrilha } from './LeadTrilha';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { MD_QUERY } from '../lib/viewRouting';
+import { getAuthHeaders } from '../lib/authHeaders';
 
 export type ClientDetailPanelProps = {
   cliente: Cliente;
@@ -367,10 +368,7 @@ export const ClientDetailPanel: React.FC<ClientDetailPanelProps> = ({
 
       const response = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
+        headers: await getAuthHeaders(),
         body: JSON.stringify({ clienteId: cliente.id })
       });
 

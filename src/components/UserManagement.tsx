@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserPlus, Trash2, CreditCard as Edit2, Save, X, Shield, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { getAuthHeaders } from '../lib/authHeaders';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserProfile } from '../contexts/AuthContext';
 
@@ -62,10 +63,7 @@ export function UserManagement() {
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-          },
+          headers: await getAuthHeaders(),
           body: JSON.stringify({
             email: newUser.email,
             password: newUser.password,
@@ -229,10 +227,7 @@ export function UserManagement() {
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/delete-user`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
-          },
+          headers: await getAuthHeaders(),
           body: JSON.stringify({ userId })
         }
       );
